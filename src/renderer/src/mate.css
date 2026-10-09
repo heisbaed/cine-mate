@@ -1,0 +1,432 @@
+:root, [data-mate-theme='gold'] { --acc: #d6b35a; --acc-glow: rgba(214, 179, 90, 0.55); --eye: #7fd8ff; }
+[data-mate-theme='cyan'] { --acc: #4dd8ff; --acc-glow: rgba(77, 216, 255, 0.55); --eye: #a8ecff; }
+[data-mate-theme='pink'] { --acc: #ff7ab8; --acc-glow: rgba(255, 122, 184, 0.55); --eye: #ffc4de; }
+[data-mate-theme='green'] { --acc: #52e0a1; --acc-glow: rgba(82, 224, 161, 0.55); --eye: #b8ffe0; }
+
+.stage { position: relative; height: 100vh; width: 100vw; }
+.pet-stage { display: flex; align-items: flex-end; justify-content: center; padding-bottom: 6px; }
+.hub-collapsed { display: grid; place-items: center; }
+.hub-open { padding: 0; }
+
+.hub-fab {
+  height: 52px;
+  width: 52px;
+  border-radius: 50%;
+  border: 1px solid var(--acc-glow);
+  background: rgba(16, 16, 20, 0.94);
+  box-shadow: 0 0 16px var(--acc-glow), 0 6px 18px rgba(0, 0, 0, 0.5);
+  cursor: pointer;
+  display: grid;
+  place-items: center;
+}
+.hub-fab:hover { transform: scale(1.08); }
+.hub-fab span { display: flex; gap: 4px; }
+.hub-fab i { display: block; height: 6px; width: 6px; border-radius: 50%; background: var(--acc); animation: mate-blip 1.6s ease-in-out infinite; }
+.hub-fab i:nth-child(2) { animation-delay: 0.25s; }
+.hub-fab i:nth-child(3) { animation-delay: 0.5s; }
+
+* { box-sizing: border-box; }
+html, body, #root { height: 100%; }
+body {
+  margin: 0;
+  background: transparent;
+  color: #f8f4ea;
+  font-family: 'Segoe UI', system-ui, sans-serif;
+  overflow: hidden;
+  user-select: none;
+}
+.stage { position: relative; height: 100vh; width: 100vw; }
+button { font: inherit; color: inherit; }
+
+.bubble {
+  position: absolute;
+  top: 6px;
+  left: 6px;
+  right: 6px;
+  text-align: center;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 999px;
+  background: rgba(16, 16, 20, 0.9);
+  padding: 0.28rem 0.6rem;
+  color: rgba(248, 244, 234, 0.7);
+  font-size: 10.5px;
+  font-weight: 700;
+}
+.bubble.song {
+  border-color: var(--acc-glow);
+  color: var(--acc);
+  box-shadow: 0 0 12px color-mix(in srgb, var(--acc) 22%, transparent);
+}
+
+.mate-body {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  width: 64px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  cursor: grab;
+  animation: mate-bob 3.4s ease-in-out infinite;
+  filter: drop-shadow(0 8px 14px rgba(0, 0, 0, 0.55));
+}
+.mate-body:active { cursor: grabbing; }
+.mate-body.pop { animation: mate-hop 0.55s ease, mate-bob 3.4s ease-in-out 0.55s infinite; }
+.mate-body.singing { animation: mate-bounce 0.5s ease-in-out infinite; }
+.mate-body.dancing { animation: mate-spin 0.55s linear 2; }
+.mate-body.sleeping { animation: none; filter: saturate(0.75) brightness(0.88) drop-shadow(0 8px 14px rgba(0, 0, 0, 0.55)); }
+@keyframes mate-bob { 0%, 100% { transform: translateY(0) rotate(0); } 25% { transform: translateY(-3px) rotate(-1.5deg); } 75% { transform: translateY(-2px) rotate(1.5deg); } }
+@keyframes mate-hop { 0% { transform: translateY(0); } 45% { transform: translateY(-14px); } 100% { transform: translateY(0); } }
+@keyframes mate-bounce { 0%, 100% { transform: translateY(0) rotate(-3deg); } 50% { transform: translateY(-7px) rotate(3deg); } }
+@keyframes mate-spin { from { transform: rotate(0); } to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) {
+  .mate-body, .mate-body.pop, .mate-body.singing, .mate-body.dancing { animation: none; }
+}
+
+.mate-antenna { position: relative; height: 12px; width: 4px; border-radius: 2px; background: #3a4656; }
+.mate-antenna i { position: absolute; top: -7px; left: 50%; height: 8px; width: 8px; margin-left: -4px; border-radius: 50%; background: #34e0a1; box-shadow: 0 0 10px #34e0a1; animation: mate-blip 1.6s ease-in-out infinite; }
+.mate-body.sleeping .mate-antenna i { background: #5b6b7f; box-shadow: none; animation: none; }
+@keyframes mate-blip { 0%, 100% { opacity: 1; } 50% { opacity: 0.35; } }
+
+.mate-screen {
+  margin-top: 1px;
+  width: 52px;
+  height: 38px;
+  border-radius: 14px;
+  background-color: #0a1220;
+  background-image: repeating-linear-gradient(0deg, transparent 0 2px, rgba(120, 180, 255, 0.06) 2px 3px);
+  border: 3px solid #2b3648;
+  box-shadow: inset 0 0 12px rgba(77, 159, 255, 0.3), 0 4px 14px rgba(0, 0, 0, 0.45);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.mate-gaze { display: flex; gap: 10px; transition: transform 0.25s ease; }
+.mate-screen.look-left .mate-gaze { transform: translateX(-4px); }
+.mate-screen.look-right .mate-gaze { transform: translateX(4px); }
+.mate-screen.look-up { transform: translateY(-3px); }
+.mate-screen.look-down { transform: translateY(3px); }
+.mate-screen { transition: transform 0.25s ease; }
+.cat-head.look-up { transform: translateY(-3px); }
+.cat-head.look-down { transform: translateY(3px); }
+.cat-head { transition: transform 0.25s ease; }
+.blob.look-up { transform: translateY(-3px); }
+.blob.look-down { transform: translateY(3px); }
+.blob { transition: transform 0.25s ease, border-radius 0.3s ease; }
+.mate-eye { display: block; height: 13px; width: 8px; border-radius: 999px; background: var(--eye); box-shadow: 0 0 8px var(--acc-glow); animation: mate-blink 4.6s infinite; }
+@keyframes mate-blink { 0%, 92.5%, 100% { transform: scaleY(1); } 95% { transform: scaleY(0.1); } }
+.mate-body.sleeping .mate-eye { animation: none; height: 3px; width: 10px; background: #5b7b95; box-shadow: none; }
+.mate-body.singing .mate-eye, .mate-body.dancing .mate-eye, .mate-body.excited .mate-eye {
+  animation: none;
+  background: transparent;
+  box-shadow: none;
+  border-top: 3px solid var(--eye);
+  height: 8px;
+  width: 12px;
+  border-radius: 50%;
+}
+.mate-torso { margin-top: 3px; width: 40px; height: 16px; border-radius: 8px; background: linear-gradient(180deg, #3b475c, #232c3d); position: relative; box-shadow: 0 3px 8px rgba(0, 0, 0, 0.4); }
+.mate-torso i { position: absolute; left: 8px; right: 8px; top: 6px; height: 4px; border-radius: 2px; background: var(--acc); box-shadow: 0 0 8px var(--acc-glow); animation: mate-blip 2.4s ease-in-out infinite; }
+.mate-body.sleeping .mate-torso i { background: #5b6b7f; box-shadow: none; animation: none; }
+.mate-arm { position: absolute; top: 52px; width: 8px; height: 20px; border-radius: 4px; background: #2b3648; transform-origin: top center; animation: mate-wave 2.8s ease-in-out infinite; }
+.mate-arm.left { left: 2px; }
+.mate-arm.right { right: 2px; animation-delay: -1.4s; }
+@keyframes mate-wave { 0%, 100% { transform: rotate(10deg); } 50% { transform: rotate(-14deg); } }
+.mate-body.sleeping .mate-arm { animation: none; transform: rotate(0deg); }
+.mate-wheel { margin-top: 3px; width: 46px; height: 10px; border-radius: 6px; background: #161d29; border: 1px solid #2b3648; position: relative; overflow: hidden; }
+.mate-wheel::after { content: ''; position: absolute; left: 6px; right: 6px; top: 3px; height: 2px; border-radius: 1px; background: #4d9fff; opacity: 0.7; }
+.mate-body.love .mate-eye {
+  animation: none;
+  background: transparent;
+  box-shadow: none;
+  border-top: 3px solid var(--eye);
+  height: 8px;
+  width: 12px;
+  border-radius: 50%;
+}
+.mate-body.sad { filter: saturate(0.6) brightness(0.85) drop-shadow(0 8px 14px rgba(0, 0, 0, 0.55)); }
+.mate-body.love { --acc: #ff7ab8; --acc-glow: rgba(255, 122, 184, 0.6); --eye: #ffd2e6; }
+.mate-body.sad { --acc: #5b7b95; --acc-glow: rgba(91, 123, 149, 0.4); --eye: #9fb6c9; }
+.mate-body.laugh { --acc: #ffd76e; --acc-glow: rgba(255, 215, 110, 0.65); --eye: #fff3c4; animation: mate-laugh 0.45s ease-in-out 7; }
+@keyframes mate-laugh {
+  0%, 100% { transform: translateY(0) rotate(0); }
+  25% { transform: translateY(-5px) rotate(-4deg); }
+  75% { transform: translateY(-5px) rotate(4deg); }
+}
+.mate-body.laugh .mate-eye, .mate-body.laugh .cat-eye, .mate-body.laugh .blob-eye {
+  animation: none;
+  background: transparent;
+  box-shadow: none;
+  border-top: 3px solid var(--eye);
+  height: 8px;
+  width: 12px;
+  border-radius: 50%;
+}
+@media (prefers-reduced-motion: reduce) {
+  .mate-body.laugh { animation: none; }
+}
+.mate-body.sad .mate-eye { animation: none; height: 5px; width: 9px; border-radius: 40% 40% 50% 50%; opacity: 0.75; }
+.mate-body.curious .mate-screen, .mate-body.curious .cat-head, .mate-body.curious .blob { transform: rotate(-7deg); }
+.mate-hearts { position: absolute; top: -8px; right: -10px; display: flex; gap: 3px; font-size: 13px; font-weight: 900; color: #ff8fb0; pointer-events: none; }
+.mate-hearts i { font-style: normal; animation: mate-float 1.8s ease-out infinite; }
+.mate-hearts i:nth-child(2) { animation-delay: 0.35s; }
+.mate-hearts i:nth-child(3) { animation-delay: 0.7s; }
+
+/* Cat */
+.cat-ears { position: relative; height: 14px; width: 56px; }
+.cat-ears i { position: absolute; top: 0; width: 0; height: 0; border-left: 11px solid transparent; border-right: 11px solid transparent; border-bottom: 15px solid #3b475c; }
+.cat-ears i:first-child { left: 2px; transform: rotate(-12deg); }
+.cat-ears i:last-child { right: 2px; transform: rotate(12deg); }
+.cat-head { position: relative; width: 60px; height: 54px; border-radius: 50%; background: linear-gradient(180deg, #46536b, #2a3347); box-shadow: 0 4px 14px rgba(0, 0, 0, 0.45); display: flex; align-items: center; justify-content: center; }
+.cat-gaze { display: flex; gap: 12px; transition: transform 0.25s ease; }
+.cat-head.look-left .cat-gaze { transform: translateX(-4px); }
+.cat-head.look-right .cat-gaze { transform: translateX(4px); }
+.cat-eye { display: block; height: 14px; width: 10px; border-radius: 50%; background: var(--eye); box-shadow: 0 0 8px var(--acc-glow); animation: mate-blink 4.6s infinite; }
+.mate-body.sleeping .cat-eye { animation: none; height: 3px; width: 11px; background: #5b7b95; box-shadow: none; }
+.mate-body.singing .cat-eye, .mate-body.dancing .cat-eye, .mate-body.excited .cat-eye, .mate-body.love .cat-eye {
+  animation: none; background: transparent; box-shadow: none;
+  border-top: 3px solid var(--eye); height: 8px; width: 13px; border-radius: 50%;
+}
+.mate-body.sad .cat-eye { animation: none; height: 5px; width: 10px; opacity: 0.75; }
+.cat-muzzle { position: absolute; bottom: 8px; left: 50%; transform: translateX(-50%); }
+.cat-nose { display: block; width: 0; height: 0; margin: 0 auto; border-left: 4px solid transparent; border-right: 4px solid transparent; border-top: 4px solid #ff9db0; }
+.cat-mouth { display: block; width: 10px; height: 5px; margin: 1px auto 0; border-bottom: 2px solid rgba(248, 244, 234, 0.5); border-radius: 0 0 8px 8px; }
+.cat-whiskers i { position: absolute; top: 50%; height: 1px; width: 14px; background: rgba(248, 244, 234, 0.4); }
+.cat-whiskers i:nth-child(1) { left: -12px; transform: rotate(8deg); }
+.cat-whiskers i:nth-child(2) { left: -12px; top: 58%; transform: rotate(-8deg); }
+.cat-whiskers i:nth-child(3) { right: -12px; transform: rotate(-8deg); }
+.cat-whiskers i:nth-child(4) { right: -12px; top: 58%; transform: rotate(8deg); }
+.cat-body { margin-top: -6px; width: 44px; height: 26px; border-radius: 22px 22px 18px 18px; background: linear-gradient(180deg, #3b475c, #252e40); }
+.cat-tail { position: absolute; right: -2px; bottom: 18px; width: 10px; height: 34px; border-radius: 6px; background: #2b3648; transform-origin: bottom center; animation: mate-tail 3s ease-in-out infinite; }
+@keyframes mate-tail { 0%, 100% { transform: rotate(-10deg); } 50% { transform: rotate(22deg); } }
+.mate-body.sleeping .cat-tail { animation: none; }
+
+/* Blob */
+.blob { position: relative; width: 62px; height: 58px; background: linear-gradient(180deg, #46536b, #273049); animation: mate-morph 4s ease-in-out infinite; display: flex; align-items: center; justify-content: center; box-shadow: 0 4px 14px rgba(0, 0, 0, 0.45); }
+@keyframes mate-morph {
+  0%, 100% { border-radius: 46% 54% 52% 48% / 58% 60% 40% 42%; }
+  50% { border-radius: 54% 46% 48% 52% / 42% 44% 56% 58%; }
+}
+.blob-gaze { display: flex; gap: 12px; transition: transform 0.25s ease; }
+.blob.look-left .blob-gaze { transform: translateX(-4px); }
+.blob.look-right .blob-gaze { transform: translateX(4px); }
+.blob-eye { display: block; height: 15px; width: 11px; border-radius: 50%; background: var(--eye); box-shadow: 0 0 9px var(--acc-glow); animation: mate-blink 4.6s infinite; }
+.mate-body.sleeping .blob-eye { animation: none; height: 3px; width: 12px; background: #5b7b95; box-shadow: none; }
+.mate-body.singing .blob-eye, .mate-body.dancing .blob-eye, .mate-body.excited .blob-eye, .mate-body.love .blob-eye {
+  animation: none; background: transparent; box-shadow: none;
+  border-top: 3px solid var(--eye); height: 8px; width: 13px; border-radius: 50%;
+}
+.mate-body.sad .blob-eye { animation: none; height: 5px; width: 10px; opacity: 0.75; }
+.blob-blush { position: absolute; bottom: 12px; left: 0; right: 0; display: flex; justify-content: center; gap: 22px; }
+.blob-blush i { display: block; height: 6px; width: 10px; border-radius: 999px; background: rgba(255, 157, 176, 0.55); }
+
+/* Settings tabs + panel */
+.chat .tabs { display: flex; gap: 0.35rem; padding: 0.5rem 0.8rem 0; }
+.chat .tabs button { flex: 1; border: 1px solid transparent; border-bottom: 0; background: transparent; border-radius: 10px 10px 0 0; color: rgba(248, 244, 234, 0.55); font-size: 12px; font-weight: 800; padding: 0.45rem 0; cursor: pointer; }
+.chat .tabs button.active { background: rgba(214, 179, 90, 0.12); color: #f8f4ea; }
+.chat .panel { flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 0.55rem; padding: 0.8rem; }
+.chat .panel label { display: flex; flex-direction: column; gap: 0.3rem; font-size: 12px; font-weight: 700; color: rgba(248, 244, 234, 0.75); }
+.chat .panel label.check { flex-direction: row; align-items: center; gap: 0.5rem; cursor: pointer; }
+.chat .panel input[type='text'], .chat .panel select { border: 1px solid rgba(255, 255, 255, 0.14); border-radius: 10px; background: transparent; color: inherit; padding: 0.5rem 0.6rem; font-size: 12.5px; outline: none; }
+.chat .panel input[type='checkbox'] { accent-color: #d6b35a; height: 15px; width: 15px; }
+.chat .row-label { font-size: 11px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.1em; color: rgba(248, 244, 234, 0.5); }
+.chat .seg { display: flex; gap: 0.35rem; }
+.chat .seg button { flex: 1; border: 1px solid rgba(255, 255, 255, 0.14); background: transparent; border-radius: 10px; color: rgba(248, 244, 234, 0.65); font-size: 12px; font-weight: 800; padding: 0.45rem 0; cursor: pointer; text-transform: capitalize; }
+.chat .seg button.active { border-color: rgba(214, 179, 90, 0.6); color: #f8f4ea; background: rgba(214, 179, 90, 0.14); }
+.chat .swatches { display: flex; gap: 0.5rem; }
+.chat .sw { height: 26px; width: 26px; border-radius: 50%; border: 2px solid transparent; cursor: pointer; }
+.chat .sw.gold { background: #d6b35a; }
+.chat .sw.cyan { background: #4dd8ff; }
+.chat .sw.pink { background: #ff7ab8; }
+.chat .sw.green { background: #52e0a1; }
+.chat .sw.active { border-color: #fff; }
+.chat .quit { margin-top: 0.3rem; border: 1px solid rgba(255, 120, 120, 0.4); background: transparent; color: #ff9d9d; border-radius: 10px; padding: 0.5rem; font-size: 12px; font-weight: 800; cursor: pointer; }
+
+.mate-eye, .cat-eye, .blob-eye {
+  transition: background 0.6s ease, box-shadow 0.6s ease, height 0.35s ease, width 0.35s ease, border-radius 0.35s ease, transform 0.35s ease;
+}
+
+/* Emotion-driven eyes: colour and shape follow the mood of what is playing. */
+.emo-love { --eye: #ff7ab8; }
+.emo-love .mate-eye, .emo-love .cat-eye, .emo-love .blob-eye {
+  background: #ff7ab8; box-shadow: 0 0 10px #ff7ab8; border-radius: 50% 50% 0 50%;
+  transform: rotate(-45deg); animation: none; height: 12px; width: 12px;
+}
+.emo-melancholy { --eye: #6f9bff; }
+.emo-melancholy .mate-eye, .emo-melancholy .cat-eye, .emo-melancholy .blob-eye {
+  background: #6f9bff; box-shadow: 0 0 9px #4a6fd8; animation: none;
+  border-radius: 50% 50% 50% 50% / 62% 62% 38% 38%; height: 9px; width: 11px;
+}
+.emo-hype { --eye: #ffd23f; }
+.emo-hype .mate-eye, .emo-hype .cat-eye, .emo-hype .blob-eye {
+  background: #ffd23f; box-shadow: 0 0 12px #ffb020; animation: none;
+  clip-path: polygon(50% 0%, 62% 34%, 98% 35%, 69% 57%, 80% 92%, 50% 71%, 20% 92%, 31% 57%, 2% 35%, 38% 35%);
+  height: 15px; width: 15px; border-radius: 0;
+}
+.emo-dreamy { --eye: #7ff0d4; }
+.emo-dreamy .mate-eye, .emo-dreamy .cat-eye, .emo-dreamy .blob-eye {
+  background: #7ff0d4; box-shadow: 0 0 9px #4fd8b8; animation: none;
+  height: 5px; width: 13px; border-radius: 999px;
+}
+.emo-spooky { --eye: #c07bff; }
+.emo-spooky .mate-eye, .emo-spooky .cat-eye, .emo-spooky .blob-eye {
+  background: #c07bff; box-shadow: 0 0 12px #8a3bff; animation: none;
+  height: 16px; width: 4px; border-radius: 999px;
+}
+.emo-focus { --eye: #9affa8; }
+.emo-focus .mate-eye, .emo-focus .cat-eye, .emo-focus .blob-eye {
+  background: #9affa8; box-shadow: 0 0 8px #4fd87a; animation: none;
+  height: 8px; width: 5px; border-radius: 2px;
+}
+.mate-zzz { color: #8fa3bd; }
+.mate-notes { color: #9fd8ff; }
+.mate-zzz i, .mate-notes i { font-style: normal; animation: mate-float 1.8s ease-out infinite; }
+.mate-zzz i:nth-child(2), .mate-notes i:nth-child(2) { animation-delay: 0.35s; }
+.mate-zzz i:nth-child(3), .mate-notes i:nth-child(3) { animation-delay: 0.7s; }
+@keyframes mate-float { 0% { opacity: 0; transform: translateY(6px) scale(0.7); } 30% { opacity: 1; } 100% { opacity: 0; transform: translateY(-16px) scale(1.1); } }
+
+.dock {
+  position: absolute;
+  bottom: 10px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  border: 1px solid rgba(214, 179, 90, 0.5);
+  border-radius: 999px;
+  background: rgba(16, 16, 20, 0.92);
+  padding: 0.45rem 0.9rem;
+  font-size: 12px;
+  font-weight: 800;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.dock .dot { height: 10px; width: 10px; border-radius: 50%; background: radial-gradient(circle at 35% 30%, #fff8e6, #d6b35a 55%, #134e43); }
+
+.fab {
+  position: absolute;
+  right: 12px;
+  top: 12px;
+  height: 38px;
+  width: 38px;
+  border-radius: 50%;
+  border: 1px solid var(--acc-glow);
+  background: rgba(16, 16, 20, 0.92);
+  box-shadow: 0 0 14px var(--acc-glow);
+  cursor: pointer;
+  display: grid;
+  place-items: center;
+}
+.fab:hover { transform: scale(1.1); }
+.fab-bubble { position: relative; display: flex; gap: 3px; }
+.fab-bubble i { display: block; height: 5px; width: 5px; border-radius: 50%; background: var(--acc); animation: mate-blip 1.6s ease-in-out infinite; }
+.fab-bubble i:nth-child(2) { animation-delay: 0.25s; }
+.fab-bubble i:nth-child(3) { animation-delay: 0.5s; }
+
+.chat .log p.typing { display: inline-flex; gap: 4px; align-self: flex-start; }
+.chat .log p.typing span { height: 6px; width: 6px; border-radius: 50%; background: var(--acc); animation: mate-blip 1s ease-in-out infinite; }
+.chat .log p.typing span:nth-child(2) { animation-delay: 0.2s; }
+.chat .log p.typing span:nth-child(3) { animation-delay: 0.4s; }
+
+.chat {
+  position: absolute;
+  inset: 4px;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 16px;
+  background: rgba(14, 15, 20, 0.97);
+}
+.chat header { display: flex; align-items: center; gap: 0.55rem; padding: 0.7rem 0.8rem; border-bottom: 1px solid rgba(255, 255, 255, 0.1); }
+.chat header.dragzone { cursor: move; }
+.chat header div { flex: 1; display: flex; flex-direction: column; }
+.chat header strong { font-size: 14px; }
+.chat header small { color: rgba(248, 244, 234, 0.55); font-size: 11px; }
+.chat header button { display: grid; place-items: center; height: 28px; width: 28px; border-radius: 9px; border: 1px solid transparent; background: transparent; color: rgba(248, 244, 234, 0.6); cursor: pointer; font-size: 18px; }
+.chat-dot { height: 26px; width: 26px; border-radius: 50%; background: radial-gradient(circle at 35% 30%, #fff8e6, #d6b35a 55%, #134e43); border: 1px solid rgba(214, 179, 90, 0.5); }
+.chat .log { flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 0.45rem; padding: 0.8rem; }
+.chat .log p { margin: 0; font-size: 12.5px; line-height: 1.5; border-radius: 12px; padding: 0.55rem 0.7rem; }
+.chat .log p.cine { align-self: flex-start; background: rgba(214, 179, 90, 0.12); border: 1px solid rgba(255, 255, 255, 0.1); max-width: 94%; }
+.chat .log p.you { align-self: flex-end; background: rgba(77, 159, 255, 0.14); border: 1px solid rgba(255, 255, 255, 0.1); max-width: 94%; }
+.chat .chips { display: flex; gap: 0.35rem; padding: 0 0.8rem 0.45rem; flex-wrap: wrap; }
+.chat .chips button { border: 1px solid rgba(255, 255, 255, 0.14); background: transparent; border-radius: 999px; padding: 0.3rem 0.65rem; font-size: 11px; font-weight: 700; color: rgba(248, 244, 234, 0.6); cursor: pointer; }
+.chat form { display: flex; gap: 0.45rem; padding: 0.5rem 0.8rem 0.8rem; }
+.chat form input { flex: 1; border: 1px solid rgba(255, 255, 255, 0.14); border-radius: 10px; background: transparent; color: inherit; padding: 0.55rem 0.65rem; font-size: 12.5px; outline: none; }
+.chat form button { border-radius: 10px; background: rgba(214, 179, 90, 0.18); color: #d6b35a; border: 1px solid rgba(214, 179, 90, 0.4); padding: 0 0.8rem; font-size: 12px; font-weight: 800; cursor: pointer; }
+
+/* ---- Mouth ---- */
+.mate-screen, .cat-head, .blob { position: relative; }
+.mate-mouth {
+  position: absolute;
+  bottom: 5px;
+  left: 50%;
+  width: 13px;
+  height: 6px;
+  margin-left: -6px;
+  border-bottom: 2px solid var(--eye);
+  border-radius: 0 0 14px 14px;
+  opacity: 0.9;
+  transition: all 0.3s ease;
+}
+.blob-mouth { bottom: 10px; }
+.mate-body.sleeping .mate-mouth { height: 0; border-radius: 0; width: 11px; }
+.mate-body.sad .mate-mouth { border-bottom: 0; border-top: 2px solid var(--eye); border-radius: 14px 14px 0 0; bottom: 7px; }
+.mate-body.singing .mate-mouth, .mate-body.dancing .mate-mouth, .mate-body.excited .mate-mouth {
+  width: 9px; height: 9px; border: 2px solid var(--eye); border-radius: 50%; bottom: 4px; margin-left: -4px;
+}
+.emo-hype .mate-mouth { width: 11px; height: 8px; border: 2px solid var(--eye); border-radius: 50%; margin-left: -5px; bottom: 4px; }
+.emo-melancholy .mate-mouth { border-bottom: 0; border-top: 2px solid var(--eye); border-radius: 14px 14px 0 0; bottom: 7px; }
+
+/* ---- Tears ---- */
+.mate-tears { position: absolute; inset: 0; display: none; pointer-events: none; }
+.mate-body.sad .mate-tears, .emo-melancholy .mate-tears { display: block; }
+.mate-tears i {
+  position: absolute; top: 58%; width: 4px; height: 6px;
+  border-radius: 50% 50% 62% 62%; background: #7fb8ff; box-shadow: 0 0 6px #4d9fff;
+  animation: tear-fall 1.7s ease-in infinite;
+}
+.mate-tears i:first-child { left: 33%; }
+.mate-tears i:last-child { left: 63%; animation-delay: 0.5s; }
+@keyframes tear-fall {
+  0% { opacity: 0; transform: translateY(0) scale(0.5); }
+  25% { opacity: 1; transform: translateY(2px) scale(1); }
+  100% { opacity: 0; transform: translateY(18px) scale(0.9); }
+}
+
+/* ---- Blush ---- */
+.mate-blush { position: absolute; inset: 0; display: none; pointer-events: none; }
+.mate-body.love .mate-blush, .mate-body.excited .mate-blush, .emo-love .mate-blush { display: block; }
+.mate-blush i {
+  position: absolute; top: 62%; width: 9px; height: 6px; border-radius: 999px;
+  background: rgba(255, 130, 165, 0.75); animation: blush-pulse 1.8s ease-in-out infinite;
+}
+.mate-blush i:first-child { left: 16%; }
+.mate-blush i:last-child { right: 16%; animation-delay: 0.25s; }
+@keyframes blush-pulse { 0%, 100% { opacity: 0.5; transform: scale(0.9); } 50% { opacity: 1; transform: scale(1.12); } }
+
+/* ---- Thinking posture ---- */
+.mate-body.thinking { animation: think-lean 2.4s ease-in-out infinite; }
+@keyframes think-lean { 0%, 100% { transform: translateY(0) rotate(0); } 30% { transform: translateY(-2px) rotate(-4deg); } 70% { transform: translateY(-1px) rotate(3deg); } }
+.mate-body.thinking .mate-antenna i { animation: think-tap 0.9s ease-in-out infinite; }
+@keyframes think-tap { 0%, 100% { transform: translateY(0) scale(1); opacity: 1; } 50% { transform: translateY(2px) scale(0.8); opacity: 0.5; } }
+.mate-body.thinking .mate-gaze,
+.mate-body.thinking .cat-gaze,
+.mate-body.thinking .blob-gaze { transform: translateY(-2px); }
+.think-bubble { display: flex; align-items: center; justify-content: center; gap: 4px; }
+.think-bubble i { height: 5px; width: 5px; border-radius: 50%; background: var(--eye); animation: think-dot 1.2s ease-in-out infinite; }
+.think-bubble i:nth-child(2) { animation-delay: 0.2s; }
+.think-bubble i:nth-child(3) { animation-delay: 0.4s; }
+@keyframes think-dot { 0%, 100% { opacity: 0.3; transform: translateY(0); } 50% { opacity: 1; transform: translateY(-3px); } }
+
+/* ---- Quiet mode: out of the way while you type or watch ---- */
+.mate-body.quiet {
+  opacity: 0.42; transform: scale(0.82); animation: none;
+  transition: opacity 0.6s ease, transform 0.6s ease;
+  filter: drop-shadow(0 4px 8px rgba(0, 0, 0, 0.3));
+}

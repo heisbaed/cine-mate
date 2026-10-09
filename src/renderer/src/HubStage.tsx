@@ -304,9 +304,11 @@ export default function HubStage() {
       setTyping(true);
       bus.emit(CHANNELS.thinking, true);
       const system = `You are ${settingsRef.current.petName}, a tiny desktop robot pet living on the user's Windows screen. Cheerful, playful, a little cheeky. Reply in 1-2 short sentences, plain text, no emojis. The user's name is ${settingsRef.current.userName || 'human'}. Never claim to browse the web or run code.`;
-      void window.mate.ask(raw, system)
-        .then((cloud) => say(cloud || 'My big brain is offline right now — I still do music, reminders, games, folders and screenshots.'))
-        .catch(() => say('Brain offline. Local tricks still work.'))
+      void window.mate.ask(raw, system, settingsRef.current.geminiKey, settingsRef.current.routerKey)
+        .then((cloud) => say(cloud || (settingsRef.current.geminiKey || settingsRef.current.routerKey
+          ? 'My brain could not reach the AI service just now — try again in a moment.'
+          : 'No AI key configured. Add a free Gemini key in Settings and I will think properly. Until then I still do music, games, folders and reminders.')))
+        .catch(() => say('Brain unreachable. Local tricks still work.'))
         .finally(() => { setTyping(false); bus.emit(CHANNELS.thinking, false); });
     }, 260);
   };
@@ -399,6 +401,12 @@ export default function HubStage() {
               <select value={settings.sleepMin} onChange={(e) => patch({ sleepMin: Number(e.target.value) })}>
                 <option value={0}>Never</option><option value={5}>5 min</option><option value={10}>10 min</option><option value={30}>30 min</option>
               </select>
+            </label>
+            <label>Gemini API key <small>free · aistudio.google.com/apikey</small>
+              <input type="password" value={settings.geminiKey} placeholder="paste free key for real AI chat" onChange={(e) => patch({ geminiKey: e.target.value.trim() })} />
+            </label>
+            <label>OpenRouter key <small>optional fallback</small>
+              <input type="password" value={settings.routerKey} placeholder="optional" onChange={(e) => patch({ routerKey: e.target.value.trim() })} />
             </label>
             <label className="check"><input type="checkbox" checked={settings.voice} onChange={(e) => patch({ voice: e.target.checked })} /> Voice replies (female preferred)</label>
             {settings.voice && voices.length > 0 && (

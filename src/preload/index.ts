@@ -45,7 +45,7 @@ export interface MateApi {
   onIdle: (cb: (idle: boolean) => void) => () => void;
   onContext: (cb: (title: string) => void) => () => void;
   onActivity: (cb: (a: { typing: boolean; fullscreen: boolean }) => void) => () => void;
-  ask: (prompt: string, system: string) => Promise<string | null>;
+  ask: (prompt: string, system: string, geminiKey: string, routerKey: string) => Promise<string | null>;
   spotifySearch: (query: string) => void;
 }
 
@@ -99,7 +99,7 @@ const api: MateApi = {
     ipcRenderer.on('mate:activity', l as never);
     return () => ipcRenderer.removeListener('mate:activity', l as never);
   },
-  ask: (prompt, system) => ipcRenderer.invoke('ai:ask', prompt, system),
+  ask: (prompt, system, geminiKey, routerKey) => ipcRenderer.invoke('ai:ask', prompt, system, geminiKey, routerKey),
   spotifySearch: (query) => ipcRenderer.send('mate:spotify-search', query),
 };
 

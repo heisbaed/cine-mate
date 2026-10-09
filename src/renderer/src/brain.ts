@@ -62,6 +62,8 @@ export interface MateSettings {
   sleepMin: number;
   voice: boolean;
   voiceURI: string;
+  geminiKey: string;
+  routerKey: string;
   clickThrough: boolean;
   login: boolean;
 }
@@ -76,6 +78,8 @@ export const DEFAULT_SETTINGS: MateSettings = {
   sleepMin: 5,
   voice: false,
   voiceURI: '',
+  geminiKey: '',
+  routerKey: '',
   clickThrough: false,
   login: false
 };

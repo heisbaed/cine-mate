@@ -4,6 +4,9 @@
 #   FULLSCREEN=0|1                  (on change)
 $ErrorActionPreference = 'SilentlyContinue'
 
+# Required for Screen metrics; without it fullscreen detection silently fails.
+try { Add-Type -AssemblyName System.Windows.Forms } catch { }
+
 Add-Type @"
 using System;
 using System.Text;

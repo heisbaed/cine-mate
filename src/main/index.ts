@@ -387,24 +387,75 @@ app.whenReady().then(() => {
   });
 
   // AI chat runs in main so there is no CORS / file-origin / CSP involvement.
-  const AI_MODELS = ['openai', 'openai-fast', 'mistral'];
-  ipcMain.handle('ai:ask', async (_e, prompt: string, system: string) => {
-    for (const model of AI_MODELS) {
-      const url = `https://text.pollinations.ai/${encodeURIComponent(`${system}\n\nUser: ${prompt}`)}?model=${model}&private=true&seed=${Math.floor(Math.random() * 100000)}`;
-      try {
-        const ctrl = new AbortController();
-        const timer = setTimeout(() => ctrl.abort(), 30000);
-        const res = await fetch(url, { signal: ctrl.signal });
-        clearTimeout(timer);
-        if (!res.ok) continue;
-        const text = (await res.text()).trim();
-        if (text && text.length > 1) return text.replace(/\s+/g, ' ').slice(0, 400);
-      } catch {
-        // try the next model
+// Providers are tried in order: Gemini (free key), OpenRouter (free key), Pollinations (keyless).
+async function askAI(prompt: string, system: string, geminiKey: string, routerKey: string): Promise<string | null> {
+  const text = `${system}\n\nUser: ${prompt}`;
+
+  if (geminiKey) {
+    try {
+      const res = await fetch(
+        `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${encodeURIComponent(geminiKey)}`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ contents: [{ parts: [{ text }] }] }),
+          signal: AbortSignal.timeout(30000)
+        }
+      );
+      if (res.ok) {
+        const data = (await res.json()) as { candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }> };
+        const out = data.candidates?.[0]?.content?.parts?.map((p) => p.text).join('').trim();
+        if (out) return out.replace(/\s+/g, ' ').slice(0, 400);
       }
+    } catch {
+      // fall through to the next provider
     }
-    return null;
-  });
+  }
+
+  if (routerKey) {
+    try {
+      const res = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${routerKey}` },
+        body: JSON.stringify({
+          model: 'meta-llama/llama-3.1-8b-instruct:free',
+          messages: [
+            { role: 'system', content: system },
+            { role: 'user', content: prompt }
+          ]
+        }),
+        signal: AbortSignal.timeout(30000)
+      });
+      if (res.ok) {
+        const data = (await res.json()) as { choices?: Array<{ message?: { content?: string } }> };
+        const out = data.choices?.[0]?.message?.content?.trim();
+        if (out) return out.replace(/\s+/g, ' ').slice(0, 400);
+      }
+    } catch {
+      // fall through
+    }
+  }
+
+  // Keyless option: still worth trying, the free tier comes and goes.
+  for (const model of ['openai', 'openai-fast']) {
+    try {
+      const res = await fetch(
+        `https://text.pollinations.ai/${encodeURIComponent(text)}?model=${model}&private=true&seed=${Math.floor(Math.random() * 100000)}`,
+        { signal: AbortSignal.timeout(20000) }
+      );
+      if (res.ok) {
+        const out = (await res.text()).trim();
+        if (out && out.length > 1) return out.replace(/\s+/g, ' ').slice(0, 400);
+      }
+    } catch {
+      // try the next model
+    }
+  }
+  return null;
+}
+
+ipcMain.handle('ai:ask', async (_e, prompt: string, system: string, geminiKey: string, routerKey: string) =>
+  askAI(prompt, system, String(geminiKey || ''), String(routerKey || '')));
   ipcMain.on('mate:window', (_e, action: string) => {
     controlWindow(String(action));
   });

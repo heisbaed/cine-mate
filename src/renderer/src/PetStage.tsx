@@ -313,7 +313,6 @@ useEffect(() => {
         className={cls}
         aria-label={`${petName}. Drag to move. Right-click for options.`}
         onPointerDown={(e) => {
-          if (ghost) return;
           const start = { sx: e.clientX, sy: e.clientY };
           drag.current = { ...start, wx: e.screenX - e.clientX, wy: e.screenY - e.clientY };
           const move = (ev: PointerEvent) => {

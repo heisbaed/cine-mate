@@ -51,6 +51,8 @@ export const VIDEO_APP = /netflix|youtube|vlc|prime video|disney|hulu|max\.|mubi
 export type PetType = 'robot' | 'cat' | 'blob';
 export type ThemeName = 'gold' | 'cyan' | 'pink' | 'green';
 export type PetSize = 'S' | 'M' | 'L';
+export const ACCESSORIES = ['none', 'hoverboard', 'scarf', 'cap', 'glasses', 'backpack', 'wings', 'crown', 'bowtie', 'star', 'sneakers'] as const;
+export type Accessory = typeof ACCESSORIES[number];
 
 export interface MateSettings {
   petName: string;
@@ -62,6 +64,22 @@ export interface MateSettings {
   sleepMin: number;
   voice: boolean;
   voiceURI: string;
+  voiceRate: number;
+  expressiveVoice: boolean;
+  voiceMood: string;
+  wakeListening: boolean;
+  headphoneColor: string;
+  faceClock: boolean;
+  repeatTimer: boolean;
+  timerSound: boolean;
+  focusBreaks: boolean;
+  breakMinutes: number;
+  focusMinutes: number;
+  stayPut: boolean;
+  quietCompanion: boolean;
+  cinemaMode: boolean;
+  autoDayNight: boolean;
+  accessory: Accessory;
   geminiKey: string;
   routerKey: string;
   clickThrough: boolean;
@@ -78,6 +96,22 @@ export const DEFAULT_SETTINGS: MateSettings = {
   sleepMin: 5,
   voice: false,
   voiceURI: '',
+  voiceRate: 1,
+  expressiveVoice: true,
+  voiceMood: 'auto',
+  wakeListening: false,
+  headphoneColor: '#f3f6fb',
+  faceClock: false,
+  repeatTimer: false,
+  timerSound: true,
+  focusBreaks: false,
+  breakMinutes: 5,
+  focusMinutes: 25,
+  stayPut: false,
+  quietCompanion: false,
+  cinemaMode: false,
+  autoDayNight: false,
+  accessory: 'none',
   geminiKey: '',
   routerKey: '',
   clickThrough: false,
@@ -111,6 +145,83 @@ export function varied<T>(pool: readonly T[], last: { current: number }): T {
   if (i === last.current) i = (i + 1) % pool.length;
   last.current = i;
   return pool[i];
+}
+
+// ---------------- Persistent brain memory ----------------
+export interface MateMemory {
+  firstSeen: number;
+  greetingCount: number;
+  totalMessages: number;
+  lastMessageAt: number;
+  memories: string[];
+  milestones: Record<string, number>;
+}
+
+const DEFAULT_MEMORY: MateMemory = {
+  firstSeen: Date.now(),
+  greetingCount: 0,
+  totalMessages: 0,
+  lastMessageAt: 0,
+  memories: [],
+  milestones: {}
+};
+
+const MEM_KEY = 'cinemate-memory-v1';
+
+export function loadMemory(): MateMemory {
+  try {
+    const raw = localStorage.getItem(MEM_KEY);
+    return raw ? { ...DEFAULT_MEMORY, ...(JSON.parse(raw) as Partial<MateMemory>) } : { ...DEFAULT_MEMORY };
+  } catch {
+    return { ...DEFAULT_MEMORY };
+  }
+}
+
+export function saveMemory(mem: MateMemory): void {
+  try {
+    localStorage.setItem(MEM_KEY, JSON.stringify(mem));
+  } catch {
+    // private mode — memory simply won't persist
+  }
+}
+
+export function recordMessage(): void {
+  const mem = loadMemory();
+  saveMemory({ ...mem, totalMessages: mem.totalMessages + 1, lastMessageAt: Date.now() });
+}
+
+export function recordGreeting(): void {
+  const mem = loadMemory();
+  saveMemory({ ...mem, greetingCount: mem.greetingCount + 1, milestones: { ...mem.milestones, greeted: (mem.milestones.greeted || 0) + 1 } });
+}
+
+export function addMemory(text: string): MateMemory {
+  const trimmed = text.trim();
+  const mem = loadMemory();
+  if (!trimmed || mem.memories.includes(trimmed)) return mem;
+  const next = { ...mem, memories: [...mem.memories, trimmed].slice(-25) };
+  saveMemory(next);
+  return next;
+}
+
+export function forgetMemory(text: string): { mem: MateMemory; removed: boolean } {
+  const mem = loadMemory();
+  const idx = mem.memories.indexOf(text.trim());
+  if (idx < 0) return { mem, removed: false };
+  const next = { ...mem, memories: mem.memories.filter((_, i) => i !== idx) };
+  saveMemory(next);
+  return { mem: next, removed: true };
+}
+
+export function forgetAllMemory(): MateMemory {
+  const mem = loadMemory();
+  const next = { ...DEFAULT_MEMORY, firstSeen: mem.firstSeen, greetingCount: mem.greetingCount, totalMessages: mem.totalMessages };
+  saveMemory(next);
+  return next;
+}
+
+export function memoryBackup(): string {
+  return JSON.stringify({ exportedAt: new Date().toISOString(), ...loadMemory() }, null, 2);
 }
 
 export const QUIPS = [
@@ -205,6 +316,26 @@ export const JOKES = [
   'Parallel lines have so much in common. Shame they will never meet.'
 ] as const;
 
+export const FACTS = [
+  'The longest movie ever made runs about 35 days — "Cinema 16".',
+  'Silent films used to have live musicians at every showing.',
+  'The first movie theater was called a Nickelodeon.',
+  'Popcorn was once sold as jewelry at cinemas in the 1920s.',
+  'The Oscar statue is actually made of bronze with gold plating.',
+  'Alfred Hitchcock never won a Best Director Oscar, surprisingly.',
+  'Movies used to be rated with stars before G/PG/PG-13/R.',
+  'The first film ever made was only about two seconds long.',
+  'James Cameron directed both Titanic and Avatar — two of the highest-grossing films.',
+  'Cinema seats were once sold by the height of the row: higher rows were pricier.'
+] as const;
+
+export const SONG_LYRICS = [
+  'La la la, movies in my head ♪',
+  'Beep-boop-doo-wop, data in the flow ♪',
+  'Render render render, we are going slow ♪',
+  'Pixel perfect, screen so bright, watching every night and every light ♪'
+] as const;
+
 export const GUESS_WINS = [
   'Got it! My prediction circuits are tingling.',
   'Yes! I felt that number in my antenna.',
@@ -229,6 +360,9 @@ export interface ChatContext {
   petName: string;
   userName: string;
   pomoLeft: number;
+  interactionHistory: string[]; // Recent interactions for context
+  userPreferences: Record<string, any>; // Learned user preferences
+  dailyPatterns: Record<string, any>; // Learned daily routines
 }
 
 export type ChatMood = 'love' | 'sad' | 'curious' | null;
@@ -238,86 +372,154 @@ export interface SkillResult {
   mood?: ChatMood;
   action?: 'dance' | 'sing' | 'sleep' | 'wake';
   pomodoro?: number;
+  timerMode?: 'timer' | 'focus';
   reminder?: { mins: number; what: string };
   setting?: Partial<MateSettings>;
+  memoryJson?: string;
+}
+
+const DURATION_WORDS: Record<string, number> = {
+  a: 1, an: 1, half: 0.5, zero: 0, one: 1, two: 2, three: 3, four: 4,
+  five: 5, six: 6, seven: 7, eight: 8, nine: 9, ten: 10, eleven: 11,
+  twelve: 12, thirteen: 13, fourteen: 14, fifteen: 15, sixteen: 16,
+  seventeen: 17, eighteen: 18, nineteen: 19, twenty: 20, thirty: 30,
+  forty: 40, fifty: 50, sixty: 60
+};
+
+function timerDurationSeconds(q: string): number | null {
+  const normalized = q.replace(/-/g, ' ');
+  const matches = [...normalized.matchAll(/\b(\d+(?:\.\d+)?|a|an|half|zero|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty|thirty|forty|fifty|sixty)\s*(seconds?|secs?|s|minutes?|mins?|m|hours?|hrs?|h)\b/g)];
+  if (!matches.length) return null;
+  return matches.reduce((sum, match) => {
+    const amount = Number(match[1]) || DURATION_WORDS[match[1]] || 0;
+    const unit = match[2];
+    return sum + amount * (/^(?:h|hr)/.test(unit) ? 3600 : /^(?:m|min)/.test(unit) ? 60 : 1);
+  }, 0);
 }
 
 // Pure rule-based skills. Returns null when nothing matches (caller tries the cloud).
 export function runSkills(q: string, ctx: ChatContext): SkillResult | null {
   const who = ctx.userName ? `, ${ctx.userName}` : '';
-  if (/(sing|song|music)/.test(q)) {
-    return { text: `♪ Beep-la-la${who}! Enjoy the show.`, action: 'sing' };
+  if (/^(?:please )?sing(?: me (?:a )?song)?[.!?]?$/.test(q)) {
+    return { text: `♪ ${SONG_LYRICS[Math.floor(Math.random() * SONG_LYRICS.length)]}${who}`, action: 'sing' };
   }
-  if (/(dance|wiggle|spin|boogie)/.test(q)) {
+  if (/^(?:please )?(dance|wiggle|spin|boogie)[.!?]?$/.test(q)) {
     return { text: 'Wiggle wiggle! My servos live for this part.', action: 'dance' };
   }
-  if (/(sleep|nap|rest|power (down|off)|good ?night)/.test(q)) {
+  if (/^(sleep|nap|rest|power (down|off)|good ?night)[.!?]?$/.test(q)) {
     return { text: 'Powering down for a catnap… nudge the mouse to wake me.', action: 'sleep' };
   }
-  if (/(wake|wake up|boot|power on)/.test(q)) {
+  if (/^(?:please )?(?:wake(?: up)?|boot|power on)[.!?]?$/.test(q)) {
     return { text: `Booting back up${who}! Missed you.`, action: 'wake' };
   }
-  const nameMatch = q.match(/(?:call me|my name is|i am|i'm)\s+([a-z][a-z\-']{1,19})/);
+  const nameMatch = q.match(/^(?:call me|my name is)\s+([a-z][a-z\-']{1,19})[.!?]?$/);
   if (nameMatch) {
     const name = nameMatch[1].replace(/^[a-z]/, (c) => c.toUpperCase());
     return { text: `Got it — ${name} it is. Nice to properly meet you!`, setting: { userName: name } };
   }
-  const petMatch = q.match(/(?:your name is|i (?:will|ll) call you|rename you to)\s+([a-z][a-z\-']{1,19})/);
+  const petMatch = q.match(/^(?:your name is|i (?:will|'?ll) call you|rename you to)\s+([a-z][a-z\-']{1,19})[.!?]?$/);
   if (petMatch) {
     const name = petMatch[1].replace(/^[a-z]/, (c) => c.toUpperCase());
     return { text: `${name}?! I love it. New name, same glow.`, setting: { petName: name } };
   }
-  if (q.includes('pomodoro') || q.includes('focus') || (q.includes('timer') && !q.includes('stop'))) {
-    const mins = Number(q.match(/(\d+)\s*(min|m\b)/)?.[1]) || 25;
-    return { text: `Pomodoro set for ${mins} minutes${who}. I will ding you. Eyes on the task!`, pomodoro: mins };
+  const timerIntent = /^(?:please )?(?:(?:(?:start|set|begin|run)(?: me)?\b.*\btimer\b|(?:\d+|a|an|half|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|twenty|thirty|forty|fifty|sixty).{0,24}\btimer\b|timer\b(?:\s|$)|time(?: me| this| that| it)?\b.*|count(?: me)? down\b))/.test(q);
+  const focusIntent = /\b(?:pomodoro|focus(?: timer)?)\b/.test(q);
+  const countdownRequest = q.replace(/^(?:please\s+|(?:can|could|would|will) you\s+(?:please\s+)?)/, '');
+  const countdownIntent = /^(?:(?:start|set|begin|do|give me|run)(?: me)?\b[^.!?]*\bcount\s*down\b|(?:\d+|a|an|half|one|two|three|four|five|six|seven|eight|nine|ten|twenty|thirty|sixty).{0,24}\bcount\s*down\b|count\s*down\b|count (?:backwards? )?from\b)/.test(countdownRequest);
+  if (timerIntent || focusIntent || countdownIntent) {
+    const bareMinutes = q.match(/^(?:pomodoro|focus(?: timer)?|timer)\s+(\d+(?:\.\d+)?)\s*[.!?]?$/);
+    const count = countdownIntent ? q.match(/(?:from|down)\s+(\d+|one|two|three|four|five|six|seven|eight|nine|ten|twenty|thirty|sixty)\b/) : null;
+    const countSeconds = count ? Number(count[1]) || DURATION_WORDS[count[1]] : null;
+    const seconds = Math.max(1, Math.min(86400, timerDurationSeconds(q) ?? countSeconds ?? (bareMinutes ? Number(bareMinutes[1]) * 60 : countdownIntent ? 10 : 25 * 60)));
+    const mode = focusIntent ? 'focus' : 'timer';
+    const duration = seconds % 60 === 0 ? `${seconds / 60} minute${seconds === 60 ? '' : 's'}` : `${seconds} seconds`;
+    return { text: mode === 'focus' ? `Focus timer set for ${duration}${who}. I will let you know when it ends.` : `Timer started for ${duration}${who}. I will let you know when it ends.`, pomodoro: seconds / 60, timerMode: mode };
   }
-  if (q.includes('stop') && ctx.pomoLeft > 0) {
+  if (/^(?:stop|cancel)(?: (?:the |my )?(?:timer|countdown|pomodoro|focus))?[.!?]?$/.test(q) && ctx.pomoLeft > 0) {
     return { text: 'Timer cancelled. Freedom!', pomodoro: -1 };
   }
-  if (q.startsWith('remind')) {
-    const mins = Number(q.match(/in (\d+)\s*(min|m\b|hour|hr|h\b)/)?.[1]) || 10;
-    const mult = /hour|hr|\bh\b/.test(q) ? 60 : 1;
-    const what = q.replace(/.*?(to|that|about)\s+/, '').trim() || 'your thing';
-    return { text: `Noted${who}. I will buzz you in ${mins} minute${mins === 1 ? '' : 's'} about “${what}”.`, reminder: { mins: mins * mult, what } };
+  const reminderMatch = q.match(/^remind me in (\d+)\s*(minutes?|mins?|m|hours?|hrs?|h) (?:to|that|about) (.+)$/);
+  const reminderAfter = q.match(/^remind me (?:to|that|about) (.+) in (\d+)\s*(minutes?|mins?|m|hours?|hrs?|h)[.!?]?$/);
+  if (reminderMatch || reminderAfter) {
+    const duration = Number(reminderMatch?.[1] ?? reminderAfter?.[2]);
+    const unit = reminderMatch?.[2] ?? reminderAfter?.[3] ?? 'minutes';
+    const mins = duration * (/^h/.test(unit) ? 60 : 1);
+    const what = (reminderMatch?.[3] ?? reminderAfter?.[1] ?? '').trim();
+    if (mins <= 0 || !what) return null;
+    return { text: `Noted${who}. I will buzz you in ${mins} minute${mins === 1 ? '' : 's'} about "${what}".`, reminder: { mins, what } };
   }
-  const themeMatch = q.match(/theme\s+(gold|cyan|pink|green)/);
+  const themeMatch = q.match(/^(?:(?:set|change)(?: the| your)? )?theme(?: to)?\s+(gold|cyan|pink|green)[.!?]?$/);
   if (themeMatch) {
     return { text: `Ooh, ${themeMatch[1]} glow — excellent taste. Wardrobe updated.`, setting: { theme: themeMatch[1] as MateSettings['theme'] } };
   }
-  const petMatch2 = q.match(/(?:become|turn into|morph to|pet)\s+(robot|cat|blob)/);
+  const petMatch2 = q.match(/^(?:become|turn into|morph to|pet)\s+(robot|cat|blob)[.!?]?$/);
   if (petMatch2) {
     return { text: `Poof! ${petMatch2[1]} mode activated. How do I look?`, setting: { pet: petMatch2[1] as PetType } };
   }
-  if (/(bigger|larger|grow|big mode)/.test(q)) return { text: 'Growing! Snacks finally paying off.', setting: { size: 'L' } };
-  if (/(smaller|tiny|shrink|small mode)/.test(q)) return { text: 'Pocket size. Adorable density increased.', setting: { size: 'S' } };
-  if (/(good bot|love you|i love|you.?re (so |very )?(cute|cool|awesome|amazing|great)|thank)/.test(q)) {
+  if (/^(?:(?:make |get )?(?:you |yourself )?)?(?:bigger|larger|grow|big mode)[.!?]?$/.test(q)) return { text: 'Growing! Snacks finally paying off.', setting: { size: 'L' } };
+  if (/^(?:(?:make |get )?(?:you |yourself )?)?(?:smaller|tiny|shrink|small mode)[.!?]?$/.test(q)) return { text: 'Pocket size. Adorable density increased.', setting: { size: 'S' } };
+  if (/^(?:good bot|(?:i )?love you|you(?:'re| are) (?:so |very )?(?:cute|cool|awesome|amazing|great)|thanks|thank you)[.!?]?$/.test(q)) {
     return { text: '', mood: 'love' };
   }
-  if (/(bad bot|stupid|dumb|hate you|shut up|annoying|ugly)/.test(q)) {
+  if (/^(?:bad bot|(?:you(?:'re| are) )?(?:stupid|dumb|annoying|ugly)|(?:i )?hate you|shut up)[.!?]?$/.test(q)) {
     return { text: '', mood: 'sad' };
   }
-  if (q.includes('time')) {
+  if (/^(?:what(?:'s| is) (?:the )?time|time)[.!?]?$/.test(q)) {
     const t = new Date();
     const hh = t.getHours().toString().padStart(2, '0');
     const mm = t.getMinutes().toString().padStart(2, '0');
     return { text: `It is ${hh}:${mm}${who} — prime clicking hours.` };
   }
-  if (q.includes('date') || q.includes('day') || q.includes('today')) {
+  if (/^(?:what(?:'s| is) (?:the )?date(?: today)?|what day is (?:it|today)|date|today)[.!?]?$/.test(q)) {
     const t = new Date();
     return { text: `Today is ${t.toLocaleDateString([], { weekday: 'long', month: 'long', day: 'numeric' })}${who}.` };
   }
-  if (q.includes('cineverse') || (q.includes('open') && q.includes('site'))) {
+  if (/^(?:open|launch|start) (?:cine-?verse|(?:the )?site)[.!?]?$/.test(q)) {
     return { text: 'Opening cine-verse for you.' };
   }
-  if (q.includes('notepad')) return { text: 'Summoning Notepad. Scribble away.' };
-  if (q.includes('calculat')) return { text: 'Calculator incoming. Math o’clock.' };
-  if (q.includes('paint')) return { text: 'MS Paint, the canvas of legends. Opened.' };
-  if (q.includes('terminal')) return { text: 'Terminal up. Try not to delete system32. (Kidding. Mostly.)' };
-  if (q.includes('help') || q.includes('what can') || q.includes('who are') || q.includes('features') || q.includes('tour')) {
-    return { text: 'Tour time! Music: "play davido", "pause music", "what is playing". Web: "google cats", "youtube lofi". PC: "open downloads", "lock pc", "screenshot", "note buy milk". Fun: "play a game", "rock paper scissors", "tell me a joke". Plus pomodoros, reminders, singing and sulking.' };
+  if (/^(?:open|launch|start) notepad[.!?]?$/.test(q)) return { text: 'Summoning Notepad. Scribble away.' };
+  if (/^(?:open|launch|start) calculator[.!?]?$/.test(q)) return { text: 'Calculator incoming. Math o’clock.' };
+  if (/^(?:open|launch|start) paint[.!?]?$/.test(q)) return { text: 'MS Paint, the canvas of legends. Opened.' };
+  if (/^(?:open|launch|start) terminal[.!?]?$/.test(q)) return { text: 'Terminal up. Try not to delete system32. (Kidding. Mostly.)' };
+  if (/^(help|features|tour|what can you do)[.!?]?$/.test(q)) {
+    return { text: 'Tour time! Music: "play davido", "pause music", "what is playing". Web: "google cats", "youtube lofi". PC: "open downloads", "lock pc", "screenshot", "note buy milk". Memory: "remember my wifi is 1234", "my memories", "forget …", "brain backup". Fun: "play a game", "rock paper scissors", "tell me a joke", "movie fact". Plus pomodoros, reminders, singing and sulking.' };
   }
-  if (q.includes('voice')) {
-    const on = /on|enable|start/.test(q);
+  const memoryMatch = q.match(/^(?:remember|memorize)(?: that)?\s+(?!how\b|why\b|when\b|what\b|who\b|where\b)(.+)$/);
+  if (memoryMatch) {
+    const what = memoryMatch[1].trim();
+    if (what) {
+      const mem = addMemory(what);
+      return { text: `Stored. I now hold ${mem.memories.length} memor${mem.memories.length === 1 ? 'y' : 'ies'}. Say "my memories" to recall them.` };
+    }
+  }
+  if (/^(?:forget|remove)\s+/.test(q) && !/(notes|notepad)/.test(q)) {
+    if (/^(?:forget|remove) (?:everything|all(?: (?:my|your))?(?: memories| memory)?)[.!?]?$/.test(q)) {
+      forgetAllMemory();
+      return { text: 'Memory wiped clean. Fresh brain, same glow.' };
+    }
+    const what = q.replace(/^(?:forget|remove)(?: the| my)?\s+/, '').replace(/^(?:the|my|about)\s+/, '').replace(/\s+from (?:your |my )?(?:memory|memories|brain)$/, '').trim();
+    if (what) {
+      const { removed } = forgetMemory(what);
+      return { text: removed ? `Gone — "${what}" is forgotten.` : `I cannot find "${what}" in my memory.` };
+    }
+  }
+  if (/^(?:my memories|list memories|what do you remember|recall(?: my memories)?)[.!?]?$/.test(q)) {
+    const mem = loadMemory();
+    return { text: mem.memories.length ? `Brain: ${mem.memories.join(' · ')}` : 'My memory is empty. Tell me "remember …" and I will keep it.' };
+  }
+  if (/^(?:(?:backup|export)(?: my| your)? (?:memory|brain|memories)|(?:brain|memory|memories) backup)[.!?]?$/.test(q)) {
+    return { text: 'Brain backup ready — copied to your clipboard.', memoryJson: memoryBackup() };
+  }
+  if (/^(?:stats|statistics|how many messages|about me|about us)[.!?]?$/.test(q)) {
+    const mem = loadMemory();
+    const days = Math.max(1, Math.ceil((Date.now() - mem.firstSeen) / 86_400_000));
+    return { text: `We have been together ${days} day${days === 1 ? '' : 's'}, exchanged ${mem.totalMessages} messages, and greeted ${mem.greetingCount} times.` };
+  }
+  if (/^(?:(?:tell me (?:a |one )?)?(?:movie )?fact|did you know)[.!?]?$/.test(q)) {
+    return { text: `Movie fact: ${FACTS[Math.floor(Math.random() * FACTS.length)]}` };
+  }
+  if (/^(?:voice (?:on|off)|(?:enable|disable|start|stop) voice)[.!?]?$/.test(q)) {
+    const on = /^(?:voice on|enable voice|start voice)/.test(q);
     return { text: on ? 'Voice box online. I will read my replies aloud.' : 'Going quiet. Text only from here.', setting: { voice: on } };
   }
   return null;
@@ -331,27 +533,3 @@ export const CHECKINS = [
   'blink twice if you can see me. …I cannot see you. Awkward.',
   'still here, still glowing.'
 ] as const;
-
-// Free cloud chat (Pollinations, no key). Uses the GET endpoint, which is the one
-// that actually answers; the /openai POST route currently returns 500.
-const MODELS = ['openai', 'openai-fast', 'mistral'];
-
-export async function askCloud(prompt: string, settings: MateSettings): Promise<string | null> {
-  const system = `You are ${settings.petName}, a tiny desktop robot pet living on the user's Windows screen. Cheerful, playful, a little cheeky. Reply in 1-2 short sentences, plain text, no emojis. The user's name is ${settings.userName || 'human'}. Never claim to browse the web or run code.`;
-  for (const model of MODELS) {
-    const url = `https://text.pollinations.ai/${encodeURIComponent(`${system}\n\nUser: ${prompt}`)}?model=${model}&private=true&seed=${Math.floor(Math.random() * 100000)}`;
-    const ctrl = new AbortController();
-    const timer = window.setTimeout(() => ctrl.abort(), 30000);
-    try {
-      const response = await fetch(url, { signal: ctrl.signal });
-      if (!response.ok) continue;
-      const text = (await response.text()).trim();
-      if (text && text.length > 1) return text.replace(/\s+/g, ' ').slice(0, 400);
-    } catch {
-      // try the next model
-    } finally {
-      window.clearTimeout(timer);
-    }
-  }
-  return null;
-}

@@ -3,3 +3,10 @@ out/
 dist/
 release/
 *.log
+gemini.key
+.preview-data/
+.qa-data/
+artifacts/
+assets/speech/bin/
+assets/speech/*.bin
+assets/speech/*.part

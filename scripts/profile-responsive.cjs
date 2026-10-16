@@ -1,0 +1,26 @@
+const { app, BrowserWindow } = require('electron');
+const { monitorEventLoopDelay, performance } = require('node:perf_hooks');
+const fs = require('node:fs/promises');
+const path = require('node:path');
+app.setPath('userData', path.resolve(__dirname, '../.qa-data/performance'));
+require('../out/main/index.js');
+const pause = ms => new Promise(resolve => setTimeout(resolve, ms));
+app.whenReady().then(async () => {
+  await pause(2000);
+  const hub = BrowserWindow.getAllWindows().find(w => w.webContents.getURL().includes('mode=hub'));
+  const delay = monitorEventLoopDelay({ resolution: 10 });
+  const cpu = process.cpuUsage();
+  const started = performance.now();
+  delay.enable();
+  const voices = hub.webContents.executeJavaScript('window.mate.voices()');
+  const system = hub.webContents.executeJavaScript('window.mate.sysinfo()');
+  await Promise.all([voices, system, pause(10000)]);
+  delay.disable();
+  const elapsed = performance.now() - started;
+  const used = process.cpuUsage(cpu);
+  const report = { version: '1.1.4', elapsedMs: Math.round(elapsed), mainCpuPercentOfOneCore: +((used.user + used.system) / (elapsed * 10)).toFixed(2), mainLoopMaxDelayMs: +(delay.max / 1e6).toFixed(2), mainLoopP99DelayMs: +(delay.percentile(99) / 1e6).toFixed(2), note: 'One Cine process tree, live media watcher, concurrent Windows voice enumeration and system information. Measures Electron main process, not physical mouse latency.' };
+  const output = path.resolve(__dirname, '../artifacts/companion'); await fs.mkdir(output, { recursive: true });
+  await fs.writeFile(path.join(output, 'responsiveness.json'), JSON.stringify(report, null, 2));
+  console.log(JSON.stringify(report));
+  app.quit();
+}).catch(error => { console.error(error); app.exit(1); });

@@ -1,14 +1,16 @@
 {
   "name": "cine-mate",
-  "version": "1.0.0",
-  "description": "CineMate — Cine the robot as a Windows desktop screen companion",
+  "version": "1.2.0",
+  "description": "Cine - an expressive Windows desktop companion",
   "main": "./out/main/index.js",
   "author": "cine-verse",
   "license": "MIT",
   "scripts": {
+    "speech:setup": "node scripts/setup-speech.mjs",
     "dev": "electron-vite dev",
     "build": "electron-vite build",
     "typecheck": "tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p tsconfig.web.json",
+    "test": "node --test scripts/regressions.test.cjs",
     "start": "electron ./out/main/index.js",
     "dist": "npm run build && electron-builder --win nsis"
   },
@@ -34,14 +36,15 @@
       "output": "release"
     },
     "extraResources": [
-      "assets/**/*"
+      "assets/**/*",
+      "gemini.key"
     ],
     "files": [
       "out/**/*",
       "package.json"
     ],
     "win": {
-      "signAndEditExecutable": false,
+      "signAndEditExecutable": true,
       "icon": "build/cine.ico",
       "target": [
         {

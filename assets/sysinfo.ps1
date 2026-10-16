@@ -9,7 +9,7 @@ if ($battery) {
   Write-Output "BATTERY=$pct"
   Write-Output "POWER=$state"
 } else {
-  Write-Output 'BATTERY=100'
+  Write-Output 'BATTERY=AC'
   Write-Output 'POWER=plugged in'
 }
 
@@ -21,5 +21,4 @@ Write-Output "MEMORY=$freeGB/$totalGB"
 $cpu = (Get-CimInstance Win32_Processor -ErrorAction SilentlyContinue | Select-Object -First 1)
 if ($cpu) { Write-Output "CPU=$([int]$cpu.LoadPercentage)" }
 
-$uptime = (Get-Date) - (Get-Process -Id $env:SystemRoot -ErrorAction SilentlyContinue).StartTime -ErrorAction SilentlyContinue
 exit 0

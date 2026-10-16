@@ -1,10 +1,13 @@
 import { app, BrowserWindow, Menu, Notification, Tray, desktopCapturer, globalShortcut, ipcMain, nativeImage, screen, shell } from 'electron';
-import { spawn, spawnSync } from 'node:child_process';
+import { execFile, spawn } from 'node:child_process';
+import { promisify } from 'node:util';
 import { promises as fs } from 'node:fs';
-import { join } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
+import { askGemini, type ChatTurn } from './ai';
+import { transcribeLocal, type SpeechEvent } from './speech';
 
 const DEFAULT_IDLE_MS = 5 * 60_000;
-const CURSOR_POLL_MS = 70;
+const CURSOR_POLL_MS = 100;
 const URL_HOSTS = ['open.spotify.com', 'www.youtube.com', 'www.google.com'];
 const FOLDERS = ['downloads', 'documents', 'desktop', 'pictures'] as const;
 
@@ -15,9 +18,10 @@ interface MediaInfo {
   playing: boolean;
 }
 
-const PET_SIZE = { width: 210, height: 190 };
+const PET_SIZE = { width: 260, height: 320 };
 const HUB_MIN = { width: 64, height: 64 };
-const HUB_MAX = { width: 400, height: 600 };
+const HUB_MAX = { width: 360, height: 650 };
+const execFileAsync = promisify(execFile);
 
 // Display name reported by the probe -> actual process name for WM_APPCOMMAND.
 const APP_PROCESS: Record<string, string> = {
@@ -30,9 +34,128 @@ let pet: BrowserWindow | null = null;
 let hub: BrowserWindow | null = null;
 let tray: Tray | null = null;
 let idleAfter = DEFAULT_IDLE_MS;
-let ghostMode = true;
-let clickThrough = true;
+let clickThrough = false;
+let mouseIgnored: boolean | null = null;
 let hubOpen = false;
+let cinemaMode = false;
+let fullscreenActive = false;
+let manuallyHidden = false;
+let petDragging = false;
+let petTopInset = 50;
+let microphone: ReturnType<typeof spawn> | null = null;
+let microphoneEnabled = false;
+let microphoneStatus: { state: string; error?: string } = { state: 'off' };
+let speechBusy = 0;
+let ignoreSpeechUntil = 0;
+let transcriptionAbort: AbortController | null = null;
+let microphoneEpoch = 0;
+let manualSession = false;
+let recordingActive = false;
+let finishingRecording = false;
+const speechDirectory = () => join(app.getPath('temp'), 'CineMate-speech');
+
+function emitSpeech(event: SpeechEvent): void {
+  event = { ...event, enabled: microphoneEnabled };
+  if (event.state !== 'heard') microphoneStatus = event;
+  hub?.webContents.send('mate:speech', event);
+  pet?.webContents.send('mate:speech', event);
+}
+
+async function transcribeCaptured(event: SpeechEvent & { path?: string; committed?: boolean }): Promise<void> {
+  const file = event.path;
+  if (!file || resolve(dirname(file)) !== resolve(speechDirectory())) return;
+  if (transcriptionAbort || (!microphoneEnabled && !event.committed) || (!event.manual && (speechBusy || Date.now() < ignoreSpeechUntil))) {
+    await fs.rm(file, { force: true }).catch(() => {});
+    return;
+  }
+  const epoch = microphoneEpoch;
+  const controller = new AbortController();
+  transcriptionAbort = controller;
+  emitSpeech({ state: 'transcribing', manual: event.manual });
+  try {
+    const text = await transcribeLocal(file, assetPath(''), controller.signal);
+    if (epoch !== microphoneEpoch) return;
+    if (text) {
+      emitSpeech({ state: 'heard', text, direct: true, manual: event.manual });
+      emitSpeech({ state: microphoneEnabled ? 'ready' : 'off' });
+    } else {
+      emitSpeech({ state: 'no-speech', error: 'I did not hear clear words. Please try speaking again.' });
+      if (manualSession) microphone?.stdin?.write('capture\n');
+    }
+  } catch (error) {
+    if (epoch === microphoneEpoch) emitSpeech({ state: 'error', error: (error as Error).message });
+  } finally {
+    transcriptionAbort = null;
+    await fs.rm(file, { force: true }).catch(() => {});
+  }
+}
+
+function setListening(enabled: boolean): { state: string; error?: string } {
+  microphoneEnabled = enabled;
+  if (!enabled) {
+    manualSession = false;
+    recordingActive = false;
+    finishingRecording = false;
+    microphoneEpoch++;
+    transcriptionAbort?.abort();
+    const child = microphone;
+    microphone = null;
+    child?.kill();
+    emitSpeech({ state: 'off' });
+    return microphoneStatus;
+  }
+  if (microphone) return microphoneStatus;
+  emitSpeech({ state: 'starting' });
+  const child = spawn('powershell.exe', ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', assetPath('listen.ps1'), '-ParentId', String(process.pid), '-TempDirectory', speechDirectory()], { windowsHide: true, stdio: ['pipe', 'pipe', 'ignore'] });
+  microphone = child;
+  let buffer = '';
+  child.stdout.setEncoding('utf8');
+  child.stdout.on('data', (chunk: string) => {
+    buffer += chunk;
+    const lines = buffer.split(/\r?\n/);
+    buffer = lines.pop() || '';
+    for (const line of lines) {
+      try {
+        const event = JSON.parse(line) as SpeechEvent & { path?: string; recording?: boolean };
+        if (microphone !== child || (!microphoneEnabled && !finishingRecording)) continue;
+        if (event.state === 'audio') {
+          recordingActive = false;
+          const committed = finishingRecording;
+          if (committed) { finishingRecording = false; microphone = null; child.kill(); }
+          void transcribeCaptured({ ...event, manual: event.manual || manualSession, committed }); continue;
+        }
+        if (event.state === 'wake') {
+          recordingActive = !!event.recording;
+          if (finishingRecording) continue;
+          if (!event.manual && (speechBusy || Date.now() < ignoreSpeechUntil)) { child.stdin.write('cancel\n'); continue; }
+          emitSpeech({ state: 'listening', manual: event.manual || manualSession });
+          continue;
+        }
+        if (finishingRecording && event.state === 'ready') continue;
+        if (event.state === 'error' || event.state === 'no-speech') {
+          recordingActive = false;
+          if (finishingRecording) { finishingRecording = false; microphone = null; child.kill(); }
+          else if (event.state === 'no-speech' && manualSession) child.stdin.write('capture\n');
+        }
+        emitSpeech(event);
+      } catch { /* partial output */ }
+    }
+  });
+  child.on('error', () => emitSpeech({ state: 'error', error: 'Could not start Windows microphone listening.' }));
+  child.on('close', () => {
+    if (microphone === child) {
+      microphone = null;
+      if (finishingRecording) { finishingRecording = false; emitSpeech({ state: 'error', error: 'Recording could not be finished. Please turn the microphone on and try again.' }); }
+      if (microphoneEnabled && microphoneStatus.state !== 'error') emitSpeech({ state: 'error', error: 'Microphone listening stopped. Retry in Settings.' });
+    }
+  });
+  return microphoneStatus;
+}
+
+function refreshPetVisibility(): void {
+  if (manuallyHidden || (cinemaMode && fullscreenActive)) pet?.hide();
+  else pet?.showInactive();
+}
 
 const prefsPath = () => join(app.getPath('userData'), 'prefs.json');
 
@@ -76,55 +199,80 @@ function workArea() {
   return screen.getPrimaryDisplay().workArea;
 }
 
-function runScript(name: string, args: string[], timeout: number): string {
-  const r = spawnSync('powershell.exe', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', assetPath(name), ...args], {
-    encoding: 'utf8', timeout, windowsHide: true
-  });
-  return (r.stdout || '').trim();
+async function runScript(name: string, args: string[], timeout: number): Promise<string> {
+  try {
+    const result = await execFileAsync('powershell.exe', ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', assetPath(name), ...args], { encoding: 'utf8', timeout, windowsHide: true });
+    return result.stdout.trim();
+  } catch { return ''; }
 }
 
 // Media keys are injected (keybd_event) and also posted as app-commands, so Windows
 // routes them to whichever app owns the active media session (Spotify, browsers, VLC).
-function controlMedia(action: string, target?: string): string {
+function controlMedia(action: string, target?: string): Promise<string> {
   return runScript('media-control.ps1', ['-Action', action, '-Target', target || ''], 15000);
 }
 
-function controlWindow(action: string): string {
+function controlWindow(action: string): Promise<string> {
   return runScript('window-control.ps1', ['-Action', action], 12000);
 }
 
-function systemInfo(): string {
-  return runScript('sysinfo.ps1', [], 25000);
+async function systemInfo(): Promise<string> {
+  try {
+    const result = await execFileAsync('powershell.exe', ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', assetPath('sysinfo.ps1')], { encoding: 'utf8', timeout: 25000, windowsHide: true });
+    return result.stdout.trim();
+  } catch { return ''; }
 }
 
-function probeMedia(): MediaInfo | null {
-  const script = assetPath('media-probe.ps1');
-  const r = spawnSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', script], {
-    encoding: 'utf8', timeout: 15000, windowsHide: true
+let latestMedia: MediaInfo | null = null;
+async function probeMedia(): Promise<MediaInfo | null> { return latestMedia; }
+
+function startMediaMonitor(): void {
+  const watcher = spawn('powershell.exe', ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', assetPath('media-probe.ps1'), '-Watch'], { windowsHide: true, stdio: ['ignore', 'pipe', 'ignore'] });
+  let buffer = '';
+  watcher.stdout.setEncoding('utf8');
+  watcher.stdout.on('data', (chunk: string) => {
+    buffer += chunk;
+    const lines = buffer.split(/\r?\n/);
+    buffer = lines.pop() || '';
+    for (const line of lines) {
+      try { latestMedia = JSON.parse(line) as MediaInfo | null; } catch { /* incomplete message */ }
+    }
   });
-  const out = (r.stdout || '').trim();
-  if (!out || out.startsWith('NONE')) return null;
-  const pick = (k: string) => {
-    const line = out.split(/\r?\n/).find((l) => l.startsWith(`${k}=`));
-    return line ? line.slice(k.length + 1).trim() : '';
-  };
-  const title = pick('TITLE');
-  if (!title) return null;
-  return { app: pick('APP') || 'media', title, artist: pick('ARTIST'), playing: pick('STATE') === 'Playing' };
+  watcher.on('error', () => { latestMedia = null; });
+  watcher.on('close', () => { latestMedia = null; });
+  app.on('will-quit', () => { try { watcher.kill(); } catch { /* already closed */ } });
 }
 
 // Windows SAPI speech — reliable on every machine, unlike Chromium TTS.
-function speak(text: string, voice: string): void {
-  const clean = text.replace(/[♪♫“”"…]/g, '').replace(/\s+/g, ' ').trim().slice(0, 220);
-  if (!clean) return;
-  try {
-    spawn('powershell.exe', [
-      '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', assetPath('speak.ps1'),
-      '-Text', clean, '-Voice', String(voice || ''), '-Rate', '1'
-    ], { detached: true, stdio: 'ignore', windowsHide: true }).unref();
-  } catch {
-    // speech unavailable
+async function speak(text: string, voice: string, rate = 1, mood = 'warm'): Promise<{ error?: string }> {
+  const clean = String(text).replace(/[\u266a\u266b\u201c\u201d"\u2026]/g, '').replace(/\s+/g, ' ').trim().slice(0, 1200);
+  if (!clean) return Promise.resolve({});
+  const speed = Number.isFinite(rate) ? Math.max(-5, Math.min(5, Math.round(rate))) : 1;
+  const args = ['-Text', clean, '-Rate', String(speed), '-Mood', ['plain', 'warm', 'happy', 'calm', 'curious', 'gentle', 'excited'].includes(mood) ? mood : 'warm'];
+  if (voice) args.push('-Voice', String(voice));
+  speechBusy++;
+  if (speechBusy === 1) microphone?.stdin?.write('suspend\n');
+  try { return await playAudioScript('speak.ps1', args); }
+  finally {
+    speechBusy--;
+    if (!speechBusy) microphone?.stdin?.write('resume\n');
+    ignoreSpeechUntil = Date.now() + 250;
   }
+}
+
+function playAudioScript(script: string, scriptArgs: string[]): Promise<{ error?: string }> {
+  return new Promise(resolve => {
+    const args = ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', assetPath(script), ...scriptArgs];
+    const child = spawn('powershell.exe', args, { windowsHide: true });
+    let detail = '';
+    child.stderr.on('data', data => { detail = (detail + String(data)).slice(-2000); });
+    const timer = setTimeout(() => { child.kill(); resolve({ error: 'Audio playback timed out. Check your Windows audio output.' }); }, 120_000);
+    child.on('error', () => { clearTimeout(timer); resolve({ error: 'Windows audio could not start.' }); });
+    child.on('close', code => {
+      clearTimeout(timer);
+      resolve(code === 0 ? {} : { error: detail.trim() || 'Windows audio failed. Check your audio output.' });
+    });
+  });
 }
 
 function createPetWindow(): void {
@@ -151,7 +299,7 @@ function createPetWindow(): void {
   });
   pet.setAlwaysOnTop(true, 'floating');
   pet.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: false });
-  pet.setIgnoreMouseEvents(clickThrough, { forward: true });
+  updateMousePolicy();
   if (process.env['ELECTRON_RENDERER_URL']) {
     void pet.loadURL(`${process.env['ELECTRON_RENDERER_URL']}?mode=pet`);
   } else {
@@ -173,6 +321,7 @@ function anchorHub(width: number, height: number): void {
 function createHubWindow(): void {
   hub = new BrowserWindow({
     ...HUB_MIN,
+    show: false,
     transparent: true,
     frame: false,
     alwaysOnTop: true,
@@ -185,6 +334,8 @@ function createHubWindow(): void {
       preload: join(__dirname, '../preload/index.js'),
       contextIsolation: true,
       sandbox: false,
+      backgroundThrottling: false,
+      autoplayPolicy: 'no-user-gesture-required',
       additionalArguments: ['--mate-mode=hub']
     }
   });
@@ -203,6 +354,8 @@ function toggleHub(force?: boolean): void {
   const next = typeof force === 'boolean' ? force : !hubOpen;
   if (next === hubOpen) return;
   hubOpen = next;
+  if (next) hub.show();
+  else hub.hide();
   const { width, height } = next ? HUB_MAX : HUB_MIN;
   const [x, y] = hub.getPosition();
   const area = workArea();
@@ -217,20 +370,37 @@ function toggleHub(force?: boolean): void {
   if (hubOpen) hub.focus();
 }
 
+function updateMousePolicy(): void {
+  if (!pet || pet.isDestroyed()) return;
+  const cursor = screen.getCursorScreenPoint();
+  const [px, py] = pet.getPosition();
+  const [pw, ph] = pet.getSize();
+  const dx = cursor.x - (px + pw / 2);
+  const nearDock = Math.abs(dx) <= 124 && cursor.y >= py + ph - 42 && cursor.y <= py + ph;
+  const nearBody = Math.abs(dx) <= pw / 2 - 12 && cursor.y >= py + petTopInset && cursor.y <= py + ph - 33;
+  const ignore = !petDragging && !nearDock && (clickThrough || !nearBody);
+  if (mouseIgnored !== ignore) { mouseIgnored = ignore; pet.setIgnoreMouseEvents(ignore, { forward: true }); }
+}
+
+function setClickThroughPreference(value: boolean): void {
+  clickThrough = value;
+  updateMousePolicy();
+  savePrefs();
+  pet?.webContents.send('mate:click-through-state', value);
+  hub?.webContents.send('mate:click-through-state', value);
+}
+
 function showMenu(): void {
   Menu.buildFromTemplate([
     { label: 'CineMate', enabled: false },
     { type: 'separator' },
     { label: 'Open chat', click: () => toggleHub(true) },
     {
-      label: 'Click-through (pet never blocks clicks)',
+      label: 'Allow clicks through pet (dock stays clickable)',
       type: 'checkbox',
       checked: clickThrough,
       click: (item) => {
-        clickThrough = item.checked;
-        pet?.setIgnoreMouseEvents(clickThrough, { forward: true });
-        savePrefs();
-        pet?.webContents.send('hub:state', hubOpen);
+        setClickThroughPreference(item.checked);
       }
     },
     {
@@ -249,6 +419,7 @@ function startCursorRadar(): void {
   let lastY = -1;
   let lastMove = Date.now();
   let idleSent = false;
+  let lastSent = '';
   setInterval(() => {
     if (!pet || pet.isDestroyed()) return;
     const cursor = screen.getCursorScreenPoint();
@@ -260,26 +431,20 @@ function startCursorRadar(): void {
       if (idleSent) {
         idleSent = false;
         pet.webContents.send('mate:idle', false);
+        hub?.webContents.send('mate:idle', false);
       }
     } else if (!idleSent && idleAfter > 0 && Date.now() - lastMove > idleAfter) {
       idleSent = true;
       pet.webContents.send('mate:idle', true);
+      hub?.webContents.send('mate:idle', true);
     }
     const area = screen.getDisplayNearestPoint(cursor).workArea;
 
-    // Ghost mode: never block clicks, except when the cursor comes close enough
-    // that the user clearly wants to grab the pet.
-    if (ghostMode) {
-      const [px, py] = pet.getPosition();
-      const [pw, ph] = pet.getSize();
-      const near = cursor.x >= px - 40 && cursor.x <= px + pw + 40 &&
-                   cursor.y >= py - 30 && cursor.y <= py + ph + 30;
-      if (near !== clickThrough) {
-        clickThrough = !near;
-        pet.setIgnoreMouseEvents(clickThrough, { forward: true });
-      }
-    }
+    updateMousePolicy();
 
+    const signature = `${cursor.x},${cursor.y},${px},${py},${area.x},${area.y},${area.width},${area.height}`;
+    if (signature === lastSent || !pet.isVisible()) return;
+    lastSent = signature;
     pet.webContents.send('mate:cursor', {
       cursor,
       winPos: { x: px, y: py },
@@ -297,12 +462,11 @@ app.whenReady().then(() => {
   createPetWindow();
   createHubWindow();
   startCursorRadar();
+  startMediaMonitor();
+  globalShortcut.register('Control+Alt+C', () => toggleHub());
+  globalShortcut.register('Control+Alt+H', () => { manuallyHidden = !manuallyHidden; refreshPetVisibility(); });
   globalShortcut.register('Control+Alt+M', () => {
-    ghostMode = !ghostMode;
-    clickThrough = ghostMode;
-    pet?.setIgnoreMouseEvents(clickThrough, { forward: true });
-    savePrefs();
-    pet?.webContents.send('hub:state', hubOpen);
+    setClickThroughPreference(!clickThrough);
   });
 
   try {
@@ -315,29 +479,22 @@ app.whenReady().then(() => {
 
   ipcMain.on('mate:menu', () => showMenu());
   ipcMain.on('mate:click-through', (_e, v: boolean) => {
-    ghostMode = !v;
-    clickThrough = v;
-    pet?.setIgnoreMouseEvents(clickThrough, { forward: true });
-    savePrefs();
+    setClickThroughPreference(!!v);
   });
   ipcMain.on('mate:ghost-mode', (_e, v: boolean) => {
-    ghostMode = !!v;
-    if (!ghostMode) pet?.setIgnoreMouseEvents(false, { forward: true });
-    savePrefs();
+    setClickThroughPreference(!!v);
   });
-  ipcMain.on('mate:click-through-state', (event) => {
-    event.returnValue = clickThrough;
-  });
+  ipcMain.handle('mate:click-through-state', () => clickThrough);
   ipcMain.on('mate:idle-after', (_e, ms: number) => {
     idleAfter = Number.isFinite(ms) && ms >= 0 ? ms : DEFAULT_IDLE_MS;
     savePrefs();
   });
   ipcMain.on('mate:move', (_e, x: number, y: number) => {
-    if (!pet || pet.isDestroyed()) return;
-    const area = workArea();
+    if (!pet || pet.isDestroyed() || !Number.isFinite(x) || !Number.isFinite(y)) return;
+    const area = screen.getDisplayNearestPoint({ x: Math.round(x + PET_SIZE.width / 2), y: Math.round(y + PET_SIZE.height / 2) }).workArea;
     pet.setPosition(
-      Math.round(Math.min(Math.max(x, area.x - 40), area.x + area.width - 60)),
-      Math.round(Math.min(Math.max(y, area.y), area.y + area.height - 60))
+      Math.round(Math.min(Math.max(x, area.x), area.x + area.width - PET_SIZE.width)),
+      Math.round(Math.min(Math.max(y, area.y - petTopInset), area.y + area.height - PET_SIZE.height))
     );
   });
   ipcMain.on('mate:mode', (event) => {
@@ -354,6 +511,9 @@ app.whenReady().then(() => {
     );
   });
   ipcMain.on('mate:login', (_e, v: boolean) => app.setLoginItemSettings({ openAtLogin: !!v, name: 'CineMate' }));
+  ipcMain.on('mate:dragging', (_e, value: boolean) => { petDragging = !!value; updateMousePolicy(); });
+  ipcMain.on('mate:pet-inset', (_e, value: number) => { if (Number.isFinite(value)) petTopInset = Math.max(0, Math.min(220, value)); });
+  ipcMain.on('mate:cinema-mode', (_e, value: boolean) => { cinemaMode = !!value; refreshPetVisibility(); });
   ipcMain.on('mate:open-site', () => void shell.openExternal('https://ourcineverse.web.app/'));
   ipcMain.on('mate:launch', (_e, name: string) => {
     const map: Record<string, string> = {
@@ -368,8 +528,8 @@ app.whenReady().then(() => {
       }
     }
   });
-  ipcMain.on('mate:media', (_e, action: string) => {
-    const media = probeMedia();
+  ipcMain.on('mate:media', async (_e, action: string) => {
+    const media = await probeMedia();
     const proc = media ? APP_PROCESS[media.app.toLowerCase()] || '' : '';
     controlMedia(String(action), proc);
   });
@@ -386,76 +546,23 @@ app.whenReady().then(() => {
     void shell.openExternal(`https://open.spotify.com/search/${encodeURIComponent(q)}`);
   });
 
-  // AI chat runs in main so there is no CORS / file-origin / CSP involvement.
-// Providers are tried in order: Gemini (free key), OpenRouter (free key), Pollinations (keyless).
-async function askAI(prompt: string, system: string, geminiKey: string, routerKey: string): Promise<string | null> {
-  const text = `${system}\n\nUser: ${prompt}`;
-
-  if (geminiKey) {
+  // Credentials stay in the main process for the bundled personal key.
+  const localKey = async (override: string) => {
+    if (String(override || '').trim()) return String(override).trim();
     try {
-      const res = await fetch(
-        `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${encodeURIComponent(geminiKey)}`,
-        {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ contents: [{ parts: [{ text }] }] }),
-          signal: AbortSignal.timeout(30000)
-        }
-      );
-      if (res.ok) {
-        const data = (await res.json()) as { candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }> };
-        const out = data.candidates?.[0]?.content?.parts?.map((p) => p.text).join('').trim();
-        if (out) return out.replace(/\s+/g, ' ').slice(0, 400);
-      }
-    } catch {
-      // fall through to the next provider
+      return (await fs.readFile(app.isPackaged ? join(process.resourcesPath, 'gemini.key') : join(__dirname, '../../gemini.key'), 'utf8')).trim();
+    } catch { return ''; }
+  };
+  ipcMain.handle('ai:ask', async (_e, turns: ChatTurn[], system: string, key: string) => {
+    if (!Array.isArray(turns) || !turns.length || turns.some(t => !t || !['user', 'model'].includes(t.role) || typeof t.text !== 'string')) {
+      return { text: null, error: 'Invalid conversation. Start a new chat.' };
     }
-  }
-
-  if (routerKey) {
-    try {
-      const res = await fetch('https://openrouter.ai/api/v1/chat/completions', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${routerKey}` },
-        body: JSON.stringify({
-          model: 'meta-llama/llama-3.1-8b-instruct:free',
-          messages: [
-            { role: 'system', content: system },
-            { role: 'user', content: prompt }
-          ]
-        }),
-        signal: AbortSignal.timeout(30000)
-      });
-      if (res.ok) {
-        const data = (await res.json()) as { choices?: Array<{ message?: { content?: string } }> };
-        const out = data.choices?.[0]?.message?.content?.trim();
-        if (out) return out.replace(/\s+/g, ' ').slice(0, 400);
-      }
-    } catch {
-      // fall through
-    }
-  }
-
-  // Keyless option: still worth trying, the free tier comes and goes.
-  for (const model of ['openai', 'openai-fast']) {
-    try {
-      const res = await fetch(
-        `https://text.pollinations.ai/${encodeURIComponent(text)}?model=${model}&private=true&seed=${Math.floor(Math.random() * 100000)}`,
-        { signal: AbortSignal.timeout(20000) }
-      );
-      if (res.ok) {
-        const out = (await res.text()).trim();
-        if (out && out.length > 1) return out.replace(/\s+/g, ' ').slice(0, 400);
-      }
-    } catch {
-      // try the next model
-    }
-  }
-  return null;
-}
-
-ipcMain.handle('ai:ask', async (_e, prompt: string, system: string, geminiKey: string, routerKey: string) =>
-  askAI(prompt, system, String(geminiKey || ''), String(routerKey || '')));
+    return askGemini(await localKey(key), String(system || '').slice(0, 12000), turns);
+  });
+  ipcMain.handle('ai:test', async (_e, key: string) => {
+    const reply = await askGemini(await localKey(key), 'Reply briefly.', [{ role: 'user', text: 'Reply with exactly: ok' }]);
+    return reply.text ? `Connected to ${reply.model}. Cine is ready to chat.` : [reply.error, reply.detail].filter(Boolean).join('\n\n');
+  });
   ipcMain.on('mate:window', (_e, action: string) => {
     controlWindow(String(action));
   });
@@ -469,7 +576,99 @@ ipcMain.handle('ai:ask', async (_e, prompt: string, system: string, geminiKey: s
     }
   });
   ipcMain.handle('mate:now-playing', () => probeMedia());
-  ipcMain.on('mate:speak', (_e, text: string, voice: string) => speak(text, voice));
+  ipcMain.handle('mate:speak', (_e, text: string, voice: string, rate?: number, mood?: string) => speak(text, voice, rate, mood));
+  ipcMain.handle('mate:listen', (_e, enabled: boolean) => setListening(!!enabled));
+  ipcMain.handle('mate:capture-speech', () => {
+    if (microphoneEnabled) {
+      microphoneEnabled = false;
+      manualSession = false;
+      if (microphone && (recordingActive || microphoneStatus.state === 'starting')) {
+        finishingRecording = true;
+        microphone.stdin?.write('finish\n');
+        emitSpeech({ state: 'finishing', manual: true });
+        const child = microphone;
+        setTimeout(() => {
+          if (finishingRecording && microphone === child) { setListening(false); emitSpeech({ state: 'error', error: 'Recording could not finish. Please try again.' }); }
+        }, 5000);
+      } else {
+        const child = microphone; microphone = null; child?.kill();
+        emitSpeech({ state: transcriptionAbort ? 'transcribing' : 'off', manual: true });
+      }
+      return microphoneStatus;
+    }
+    if (finishingRecording) return microphoneStatus;
+    manualSession = true;
+    setListening(true);
+    microphone?.stdin?.write('capture\n');
+    return microphoneStatus;
+  });
+  ipcMain.on('mate:arm-speech', () => {
+    const epoch = microphoneEpoch;
+    setTimeout(() => {
+      if (microphoneEnabled && epoch === microphoneEpoch && !speechBusy) microphone?.stdin?.write(manualSession ? 'capture\n' : 'arm\n');
+    }, Math.max(0, ignoreSpeechUntil - Date.now()));
+  });
+  ipcMain.handle('mate:play-song', async (_e, query: string) => {
+    const clean = String(query || '').trim().slice(0, 180);
+    if (!clean) return { playing: false, error: 'Tell me the name of the song you want.' };
+    const words = clean.toLowerCase().split(/[^\p{L}\p{N}]+/u).filter(word => word && !['by', 'song', 'the', 'please'].includes(word));
+    const current = latestMedia ? `${latestMedia.artist} ${latestMedia.title}`.toLowerCase() : '';
+    if (latestMedia?.playing && /spotify/i.test(latestMedia.app) && words.length && words.every(word => current.includes(word))) return { playing: true, title: latestMedia.title };
+    try {
+      await shell.openExternal(`spotify:search:${encodeURIComponent(clean)}`);
+      const result = await execFileAsync('powershell.exe', ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', assetPath('spotify-play.ps1'), '-Query', clean], { encoding: 'utf8', timeout: 20000, windowsHide: true });
+      const selected = JSON.parse(result.stdout.trim()) as { invoked: boolean; title?: string; error?: string };
+      if (!selected.invoked || !selected.title) return { playing: false, error: selected.error || 'Spotify could not start a matching song.' };
+      await new Promise(resolve => setTimeout(resolve, 700));
+      await runScript('media-control.ps1', ['-Action', 'play'], 10000);
+      const normalize = (text: string) => text.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, ' ').trim();
+      const wanted = normalize(selected.title);
+      const deadline = Date.now() + 10000;
+      while (Date.now() < deadline) {
+        if (latestMedia?.playing && /spotify/i.test(latestMedia.app) && [latestMedia.title, `${latestMedia.title} ${latestMedia.artist}`, `${latestMedia.artist} ${latestMedia.title}`].some(label => normalize(label).includes(wanted))) return { playing: true, title: latestMedia.title };
+        await new Promise(resolve => setTimeout(resolve, 400));
+      }
+      return { playing: false, error: `I selected ${selected.title}, but Spotify has not confirmed playback. Check whether Spotify is showing an ad or sign-in prompt.` };
+    } catch (error) {
+      const output = (error as { stdout?: string }).stdout;
+      try { return { playing: false, error: JSON.parse(output || '{}').error || 'Could not start Spotify playback. Check that Spotify is installed and signed in.' }; }
+      catch { return { playing: false, error: 'Could not start Spotify playback. Check that Spotify is installed and signed in.' }; }
+    }
+  });
+  ipcMain.handle('mate:timer-alert', async () => {
+    try {
+      if (!hub || hub.isDestroyed()) throw new Error('Audio window unavailable');
+      await hub.webContents.executeJavaScript(`(async () => {
+        const context = new AudioContext();
+        try {
+          await context.resume();
+          if (context.state !== 'running') throw new Error('Audio output is suspended');
+          const start = context.currentTime + .03;
+          const notes = [659.25, 830.61, 987.77, 0, 659.25, 830.61, 987.77];
+          notes.forEach((frequency, i) => {
+            if (!frequency) return;
+            const oscillator = context.createOscillator();
+            const gain = context.createGain();
+            oscillator.type = 'sine'; oscillator.frequency.value = frequency;
+            const at = start + i * .33;
+            gain.gain.setValueAtTime(0, at);
+            gain.gain.linearRampToValueAtTime(.5, at + .015);
+            gain.gain.exponentialRampToValueAtTime(.001, at + .31);
+            oscillator.connect(gain); gain.connect(context.destination);
+            oscillator.start(at); oscillator.stop(at + .32);
+          });
+          await new Promise(resolve => setTimeout(resolve, 2500));
+        } finally { await context.close(); }
+      })()`);
+      return {};
+    } catch {
+      return playAudioScript('timer-alert.ps1', []);
+    }
+  });
+  ipcMain.handle('mate:voices', async () => {
+    try { return JSON.parse(await runScript('speak.ps1', ['-ListVoices'], 15000) || '[]'); }
+    catch { return []; }
+  });
   ipcMain.on('mate:open-url', (_e, raw: string) => {
     try {
       const u = new URL(String(raw));
@@ -528,6 +727,8 @@ ipcMain.handle('ai:ask', async (_e, prompt: string, system: string, geminiKey: s
           pet?.webContents.send('mate:activity', { typing, fullscreen });
         } else if (line.startsWith('FULLSCREEN=')) {
           fullscreen = line.slice(11).trim() === '1';
+          fullscreenActive = fullscreen;
+          refreshPetVisibility();
           pet?.webContents.send('mate:activity', { typing, fullscreen });
         }
       }
@@ -540,4 +741,4 @@ ipcMain.handle('ai:ask', async (_e, prompt: string, system: string, geminiKey: s
 });
 
 app.on('window-all-closed', () => app.quit());
-app.on('will-quit', () => globalShortcut.unregisterAll());
+app.on('will-quit', () => { transcriptionAbort?.abort(); microphone?.kill(); globalShortcut.unregisterAll(); });

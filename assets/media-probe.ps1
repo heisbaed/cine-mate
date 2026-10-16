@@ -1,52 +1,45 @@
-# CineMate media probe. Prints CURRENT/TITLE/ARTIST/APP/STATE or NONE.
-# Works on plain Windows PowerShell 5.1 (no WinRT), no admin needed.
-$ErrorActionPreference = 'SilentlyContinue'
-$OutputEncoding = [System.Text.Encoding]::UTF8
-
-$players = @(
-  @{ proc = 'spotify';            app = 'Spotify' },
-  @{ proc = 'chrome';             app = 'Chrome' },
-  @{ proc = 'msedge';             app = 'Edge' },
-  @{ proc = 'firefox';            app = 'Firefox' },
-  @{ proc = 'vlc';                app = 'VLC' },
-  @{ proc = 'wmplayer';           app = 'Media Player' },
-  @{ proc = 'AIMP';               app = 'AIMP' },
-  @{ proc = 'ApplicationFrameHost'; app = 'Media App' }
-)
-
-$tails = @(
-  ' - Google Chrome', ' - Microsoft Edge', ' - Mozilla Firefox',
-  ' - YouTube', ' - Spotify', ' - VLC media player'
-)
-
-$found = $null
-foreach ($p in $players) {
-  $proc = Get-Process -Name $p.proc -ErrorAction SilentlyContinue |
-          Where-Object { $_.MainWindowTitle } |
-          Select-Object -First 1
-  if ($proc -and $proc.MainWindowTitle) {
-    $found = [pscustomobject]@{ App = $p.app; Title = $proc.MainWindowTitle }
-    break
+param([switch]$Watch)
+# Read real Windows media-session state; window titles cannot prove playback.
+$ErrorActionPreference = 'Stop'
+[Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+try {
+  Add-Type -AssemblyName System.Runtime.WindowsRuntime
+  $managerType = [Windows.Media.Control.GlobalSystemMediaTransportControlsSessionManager, Windows.Media.Control, ContentType=WindowsRuntime]
+  $propertiesType = [Windows.Media.Control.GlobalSystemMediaTransportControlsSessionMediaProperties, Windows.Media.Control, ContentType=WindowsRuntime]
+  $asTask = [System.WindowsRuntimeSystemExtensions].GetMethods() | Where-Object {
+    $_.Name -eq 'AsTask' -and $_.IsGenericMethod -and $_.GetGenericArguments().Count -eq 1 -and
+    $_.GetParameters().Count -eq 1 -and $_.GetParameters()[0].ParameterType.Name -eq 'IAsyncOperation`1'
+  } | Select-Object -First 1
+  function Await-Operation($operation, $resultType) {
+    $task = $asTask.MakeGenericMethod($resultType).Invoke($null, @($operation))
+    if (-not $task.Wait(8000)) { throw 'Media session timed out.' }
+    return $task.Result
   }
+  $manager = Await-Operation ($managerType::RequestAsync()) $managerType
+  function Get-MediaState {
+  $session = $manager.GetSessions() | Where-Object { $_.GetPlaybackInfo().PlaybackStatus.ToString() -eq 'Playing' } | Select-Object -First 1
+  if (-not $session) { $session = $manager.GetCurrentSession() }
+  if (-not $session) { return $null }
+  $media = Await-Operation ($session.TryGetMediaPropertiesAsync()) $propertiesType
+  if (-not $media.Title) { return $null }
+  $source = $session.SourceAppUserModelId
+  $appName = $source
+  if ($source -match '(?i)spotify') { $appName = 'Spotify' }
+  elseif ($source -match '(?i)chrome') { $appName = 'Chrome' }
+  elseif ($source -match '(?i)msedge|edge') { $appName = 'Edge' }
+  elseif ($source -match '(?i)firefox') { $appName = 'Firefox' }
+  elseif ($source -match '(?i)vlc') { $appName = 'VLC' }
+  elseif ($source -match '(?i)zunemusic|mediaplayer') { $appName = 'Media Player' }
+  return @{ app = $appName; title = $media.Title; artist = $media.Artist; playing = $session.GetPlaybackInfo().PlaybackStatus.ToString() -eq 'Playing' }
+  }
+  do {
+    try { $state = Get-MediaState } catch { $state = $null }
+    $line = if ($null -eq $state) { 'null' } else { ConvertTo-Json -InputObject $state -Compress }
+    [Console]::Out.WriteLine($line)
+    [Console]::Out.Flush()
+    if ($Watch) { Start-Sleep -Milliseconds 1500 }
+  } while ($Watch)
+
+} catch {
+  Write-Output 'null'
 }
-
-if (-not $found) { Write-Output 'NONE'; exit 0 }
-
-$title = $found.Title
-foreach ($t in $tails) { $title = $title.Replace($t, '') }
-$title = $title.Trim()
-if (-not $title) { Write-Output 'NONE'; exit 0 }
-
-$artist = ''
-if ($title -match '^(.*?)\s+[-–—]\s+(.+)$') {
-  $artist = $Matches[1].Trim()
-  $title = $Matches[2].Trim()
-}
-if ($title.Length -gt 90) { $title = $title.Substring(0, 90) }
-if ($artist.Length -gt 60) { $artist = $artist.Substring(0, 60) }
-
-Write-Output 'CURRENT'
-Write-Output "APP=$($found.App)"
-Write-Output "TITLE=$title"
-Write-Output "ARTIST=$artist"
-Write-Output 'STATE=Playing'

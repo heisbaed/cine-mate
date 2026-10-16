@@ -1,4 +1,5 @@
 import { contextBridge, ipcRenderer } from 'electron';
+import type { AIReply, ChatTurn } from '../main/ai';
 
 export interface CursorState {
   cursor: { x: number; y: number };
@@ -12,6 +13,7 @@ export interface MediaInfo {
   artist: string;
   playing: boolean;
 }
+export interface SpeechEvent { state: string; text?: string; error?: string; direct?: boolean; manual?: boolean; enabled?: boolean }
 
 const modeArg = process.argv.find((a) => a.startsWith('--mate-mode='));
 
@@ -26,12 +28,23 @@ export interface MateApi {
   setClickThrough: (value: boolean) => void;
   setGhostMode: (value: boolean) => void;
   getClickThrough: () => Promise<boolean>;
+  onClickThrough: (callback: (enabled: boolean) => void) => () => void;
   setIdleAfter: (ms: number) => void;
   launch: (app: string) => void;
   media: (action: string) => void;
   spotify: (action: 'open' | 'close') => void;
   nowPlaying: () => Promise<MediaInfo | null>;
-  speak: (text: string, voice: string) => void;
+  speak: (text: string, voice: string, rate?: number, mood?: string) => Promise<{ error?: string }>;
+  listen: (enabled: boolean) => Promise<SpeechEvent>;
+  captureSpeech: () => Promise<SpeechEvent>;
+  armSpeech: () => void;
+  onSpeech: (callback: (event: SpeechEvent) => void) => () => void;
+  playSong: (query: string) => Promise<{ playing: boolean; title?: string; error?: string }>;
+  voices: () => Promise<Array<{ uri: string; name: string }>>;
+  timerAlert: () => Promise<{ error?: string }>;
+  setCinemaMode: (value: boolean) => void;
+  setDragging: (value: boolean) => void;
+  setPetInset: (value: number) => void;
   openUrl: (url: string) => void;
   openFolder: (kind: string) => void;
   lock: () => void;
@@ -45,7 +58,8 @@ export interface MateApi {
   onIdle: (cb: (idle: boolean) => void) => () => void;
   onContext: (cb: (title: string) => void) => () => void;
   onActivity: (cb: (a: { typing: boolean; fullscreen: boolean }) => void) => () => void;
-  ask: (prompt: string, system: string, geminiKey: string, routerKey: string) => Promise<string | null>;
+  ask: (turns: ChatTurn[], system: string, geminiKey: string) => Promise<AIReply>;
+  testAI: (geminiKey: string) => Promise<string>;
   spotifySearch: (query: string) => void;
 }
 
@@ -64,12 +78,31 @@ const api: MateApi = {
   setClickThrough: (v) => ipcRenderer.send('mate:click-through', v),
   setGhostMode: (v) => ipcRenderer.send('mate:ghost-mode', v),
   getClickThrough: () => ipcRenderer.invoke('mate:click-through-state'),
+  onClickThrough: callback => {
+    const listener = (_event: unknown, enabled: boolean) => callback(enabled);
+    ipcRenderer.on('mate:click-through-state', listener);
+    return () => { ipcRenderer.removeListener('mate:click-through-state', listener); };
+  },
   setIdleAfter: (ms) => ipcRenderer.send('mate:idle-after', ms),
   launch: (name) => ipcRenderer.send('mate:launch', name),
   media: (action) => ipcRenderer.send('mate:media', action),
   spotify: (action) => ipcRenderer.send('mate:spotify', action),
   nowPlaying: () => ipcRenderer.invoke('mate:now-playing'),
-  speak: (text, voice) => ipcRenderer.send('mate:speak', text, voice),
+  speak: (text, voice, rate, mood) => ipcRenderer.invoke('mate:speak', text, voice, rate, mood),
+  listen: enabled => ipcRenderer.invoke('mate:listen', enabled),
+  captureSpeech: () => ipcRenderer.invoke('mate:capture-speech'),
+  armSpeech: () => ipcRenderer.send('mate:arm-speech'),
+  onSpeech: callback => {
+    const listener = (_e: unknown, event: SpeechEvent) => callback(event);
+    ipcRenderer.on('mate:speech', listener);
+    return () => { ipcRenderer.removeListener('mate:speech', listener); };
+  },
+  playSong: query => ipcRenderer.invoke('mate:play-song', query),
+  voices: () => ipcRenderer.invoke('mate:voices'),
+  timerAlert: () => ipcRenderer.invoke('mate:timer-alert'),
+  setCinemaMode: value => ipcRenderer.send('mate:cinema-mode', value),
+  setDragging: value => ipcRenderer.send('mate:dragging', value),
+  setPetInset: value => ipcRenderer.send('mate:pet-inset', value),
   openUrl: (url) => ipcRenderer.send('mate:open-url', url),
   openFolder: (kind) => ipcRenderer.send('mate:open-folder', kind),
   lock: () => ipcRenderer.send('mate:lock'),
@@ -99,7 +132,8 @@ const api: MateApi = {
     ipcRenderer.on('mate:activity', l as never);
     return () => ipcRenderer.removeListener('mate:activity', l as never);
   },
-  ask: (prompt, system, geminiKey, routerKey) => ipcRenderer.invoke('ai:ask', prompt, system, geminiKey, routerKey),
+  ask: (turns, system, geminiKey) => ipcRenderer.invoke('ai:ask', turns, system, geminiKey),
+  testAI: (geminiKey) => ipcRenderer.invoke('ai:test', geminiKey),
   spotifySearch: (query) => ipcRenderer.send('mate:spotify-search', query),
 };
 
